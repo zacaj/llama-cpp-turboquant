@@ -2540,7 +2540,9 @@ static common_chat_params common_chat_params_init_minimax_m3(const common_chat_t
 
             // A turn without reasoning is prefixed with a bare </mm:think>, written either by the
             // generation prompt (thinking_mode = "disabled") or by the model itself.
-            reasoning = p.optional(p.choice({ block, p.literal(THINK_END) }));
+            // Allow optional whitespace before the tag — some models emit a newline between the
+            // generation prompt and the thinking tag.
+            reasoning = p.optional(p.space() + p.choice({ block, p.literal(THINK_END) }));
         }
 
         if (has_response_format) {
