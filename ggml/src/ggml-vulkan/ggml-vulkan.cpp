@@ -6491,7 +6491,13 @@ static vk_device ggml_vk_get_device(size_t idx) {
                                 (vk11_props.subgroupSupportedOperations & vk::SubgroupFeatureFlagBits::eVote);
 
         // Submit at least every 100 nodes, in case there are workloads without as much matmul.
-        device->max_nodes_per_submit = 100;
+        // On integrated GPUs / APUs, batching too much work into a single vkQueueSubmit
+        // can exceed the GPU job watchdog (e.g. amdgpu.lockup_timeout default 2000ms on
+        // RADV) and trigger a device-lost at deep context / heavy graphs (issue #185; cf.
+        // upstream ggml-org/llama.cpp#21724, where lowering this resolves the same
+        // ErrorDeviceLost with no measurable regression). Submit frequently on uma devices
+        // by default; GGML_VK_MAX_NODES_PER_SUBMIT below still overrides explicitly.
+        device->max_nodes_per_submit = device->uma ? 1 : 100;
         const char* GGML_VK_MAX_NODES_PER_SUBMIT = getenv("GGML_VK_MAX_NODES_PER_SUBMIT");
         if (GGML_VK_MAX_NODES_PER_SUBMIT != nullptr) {
             uint32_t max_nodes_per_submit = std::stoul(GGML_VK_MAX_NODES_PER_SUBMIT);
