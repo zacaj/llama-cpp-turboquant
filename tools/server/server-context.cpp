@@ -1361,6 +1361,10 @@ private:
                 }
                 cparams_dft.n_rs_seq = 0;
 
+                if (params_base.speculative.draft.n_ctx > 0) {
+                    cparams_dft.n_ctx = params_base.speculative.draft.n_ctx;
+                }
+
                 std::vector<ggml_backend_dev_t> devs;
                 uint32_t hp_ngl = 0;
                 uint32_t hp_nct = 0;

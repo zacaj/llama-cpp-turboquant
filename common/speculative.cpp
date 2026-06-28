@@ -1816,6 +1816,22 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
                 return false;
             }
 
+            // when the draft context is smaller than the target, evict old entries
+            // before they exceed the draft KV capacity
+            const uint32_t n_ctx_dft = llama_n_ctx(ctx_dft);
+            if (n_ctx_dft < llama_n_ctx(ctx_tgt)) {
+                for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) n_seq; ++seq_id) {
+                    const llama_pos pos_max = llama_memory_seq_pos_max(llama_get_memory(ctx_dft), seq_id);
+                    if (pos_max >= 0 && pos_max + n_tokens >= (llama_pos) n_ctx_dft) {
+                        const llama_pos n_used  = pos_max + 1;
+                        const llama_pos n_need  = n_used + n_tokens - (llama_pos) n_ctx_dft;
+                        const llama_pos n_evict = std::max(n_need, (llama_pos)(n_ctx_dft / 2));
+                        const llama_pos p_min   = llama_memory_seq_pos_min(llama_get_memory(ctx_dft), seq_id);
+                        llama_memory_seq_rm(llama_get_memory(ctx_dft), seq_id, p_min, p_min + n_evict);
+                    }
+                }
+            }
+
             common_batch_clear(batch);
 
             for (int k = 0; k < n_tokens; ++k) {
@@ -2913,6 +2929,10 @@ common_speculative_init_result::common_speculative_init_result(
     //       the extra memory for small models is likely negligible?
     cparams.n_rs_seq  = 0;
     cparams.ctx_other = ctx_tgt;
+
+    if (params.speculative.draft.n_ctx > 0) {
+        cparams.n_ctx = params.speculative.draft.n_ctx;
+    }
 
     std::string model_path;
     if (has_draft) {
