@@ -117,36 +117,68 @@ if (CUDAToolkit_FOUND)
         list(APPEND GGML_SOURCES_CUDA ${SRCS})
         add_compile_definitions(GGML_CUDA_FA_ALL_QUANTS)
     else()
+        # All K/V pairs from q8_0 down to turbo2, where V bpw <= K bpw.
+        # To add more combos (f16, bf16, etc.), build with -DGGML_CUDA_FA_ALL_QUANTS=ON.
         list(APPEND GGML_SOURCES_CUDA
-            template-instances/fattn-vec-instance-f16-f16.cu
-            template-instances/fattn-vec-instance-q4_0-q4_0.cu
+            # K=q8_0 (8.0 bpw)
             template-instances/fattn-vec-instance-q8_0-q8_0.cu
             template-instances/fattn-vec-instance-f16-q8_0.cu
             template-instances/fattn-vec-instance-q8_0-f16.cu
             template-instances/fattn-vec-instance-bf16-q8_0.cu
             template-instances/fattn-vec-instance-q8_0-bf16.cu
             template-instances/fattn-vec-instance-bf16-bf16.cu
-            template-instances/fattn-vec-instance-turbo3_0-turbo3_0.cu
             template-instances/fattn-vec-instance-turbo3_0-q8_0.cu
-            template-instances/fattn-vec-instance-q8_0-turbo3_0.cu
             template-instances/fattn-vec-instance-f16-turbo3_0.cu
             template-instances/fattn-vec-instance-turbo3_0-f16.cu
-            template-instances/fattn-vec-instance-turbo2_0-turbo2_0.cu
             template-instances/fattn-vec-instance-turbo2_0-q8_0.cu
-            template-instances/fattn-vec-instance-q8_0-turbo2_0.cu
             template-instances/fattn-vec-instance-f16-turbo2_0.cu
             template-instances/fattn-vec-instance-turbo2_0-f16.cu
-            template-instances/fattn-vec-instance-turbo3_0-turbo2_0.cu
             template-instances/fattn-vec-instance-turbo2_0-turbo3_0.cu
-            template-instances/fattn-vec-instance-turbo4_0-turbo4_0.cu
             template-instances/fattn-vec-instance-turbo4_0-q8_0.cu
+            template-instances/fattn-vec-instance-q8_0-q5_1.cu
+            template-instances/fattn-vec-instance-q8_0-q5_0.cu
+            template-instances/fattn-vec-instance-q8_0-q4_1.cu
             template-instances/fattn-vec-instance-q8_0-turbo4_0.cu
-            template-instances/fattn-vec-instance-f16-turbo4_0.cu
-            template-instances/fattn-vec-instance-turbo4_0-f16.cu
+            template-instances/fattn-vec-instance-q8_0-q4_0.cu
+            template-instances/fattn-vec-instance-q8_0-turbo3_0.cu
+            template-instances/fattn-vec-instance-q8_0-turbo2_0.cu
+            # K=q5_1 (5.5 bpw)
+            template-instances/fattn-vec-instance-q5_1-q5_1.cu
+            template-instances/fattn-vec-instance-q5_1-q5_0.cu
+            template-instances/fattn-vec-instance-q5_1-q4_1.cu
+            template-instances/fattn-vec-instance-q5_1-turbo4_0.cu
+            template-instances/fattn-vec-instance-q5_1-q4_0.cu
+            template-instances/fattn-vec-instance-q5_1-turbo3_0.cu
+            template-instances/fattn-vec-instance-q5_1-turbo2_0.cu
+            # K=q5_0 (5.0 bpw)
+            template-instances/fattn-vec-instance-q5_0-q5_0.cu
+            template-instances/fattn-vec-instance-q5_0-q4_1.cu
+            template-instances/fattn-vec-instance-q5_0-turbo4_0.cu
+            template-instances/fattn-vec-instance-q5_0-q4_0.cu
+            template-instances/fattn-vec-instance-q5_0-turbo3_0.cu
+            template-instances/fattn-vec-instance-q5_0-turbo2_0.cu
+            # K=q4_1 (4.5 bpw)
+            template-instances/fattn-vec-instance-q4_1-q4_1.cu
+            template-instances/fattn-vec-instance-q4_1-turbo4_0.cu
+            template-instances/fattn-vec-instance-q4_1-q4_0.cu
+            template-instances/fattn-vec-instance-q4_1-turbo3_0.cu
+            template-instances/fattn-vec-instance-q4_1-turbo2_0.cu
+            # K=turbo4 (~4.5 bpw)
+            template-instances/fattn-vec-instance-turbo4_0-turbo4_0.cu
+            template-instances/fattn-vec-instance-turbo4_0-q4_1.cu
+            template-instances/fattn-vec-instance-turbo4_0-q4_0.cu
             template-instances/fattn-vec-instance-turbo4_0-turbo3_0.cu
-            template-instances/fattn-vec-instance-turbo3_0-turbo4_0.cu
             template-instances/fattn-vec-instance-turbo4_0-turbo2_0.cu
-            template-instances/fattn-vec-instance-turbo2_0-turbo4_0.cu)
+            # K=q4_0 (4.0 bpw)
+            template-instances/fattn-vec-instance-q4_0-q4_0.cu
+            template-instances/fattn-vec-instance-q4_0-turbo3_0.cu
+            template-instances/fattn-vec-instance-q4_0-turbo2_0.cu
+            # K=turbo3 (~3.5 bpw)
+            template-instances/fattn-vec-instance-turbo3_0-turbo3_0.cu
+            template-instances/fattn-vec-instance-turbo3_0-turbo2_0.cu
+            # K=turbo2 (~2.0 bpw)
+            template-instances/fattn-vec-instance-turbo2_0-turbo2_0.cu
+        )
     endif()
 
     ggml_add_backend_library(ggml-cuda

@@ -1237,10 +1237,65 @@ struct common_init_result::impl {
     std::vector<llama_sampler_seq_config> samplers_seq_config;
 };
 
+// Check if a K/V type combo has an optimized VEC flash-attention kernel.
+// This mirrors the default (non-FA_ALL_QUANTS) set from ggml/src/ggml-cuda/CMakeLists.txt:
+// all K/V pairs from q8_0 down to turbo2 where V bpw <= K bpw.
+static float common_kv_type_bpw(ggml_type type) {
+    switch (type) {
+        case GGML_TYPE_F32:      return 32.0f;
+        case GGML_TYPE_F16:      return 16.0f;
+        case GGML_TYPE_BF16:     return 16.0f;
+        case GGML_TYPE_Q8_0:     return  8.0f;
+        case GGML_TYPE_Q5_1:     return  5.5f;
+        case GGML_TYPE_Q5_0:     return  5.0f;
+        case GGML_TYPE_Q4_1:     return  4.5f;
+        case GGML_TYPE_IQ4_NL:   return  4.5f;
+        case GGML_TYPE_TURBO4_0: return  4.5f;
+        case GGML_TYPE_Q4_0:     return  4.0f;
+        case GGML_TYPE_TURBO3_0: return  3.5f;
+        case GGML_TYPE_TURBO2_0: return  2.0f;
+        default:                 return  0.0f;
+    }
+}
+
+static bool common_fattn_vec_has_instance(ggml_type type_k, ggml_type type_v) {
+    const float bpw_k = common_kv_type_bpw(type_k);
+    const float bpw_v = common_kv_type_bpw(type_v);
+
+    // Only q8_0 through turbo2 are in the compiled set
+    if (bpw_k > 8.0f || bpw_k == 0.0f || bpw_v > 8.0f || bpw_v == 0.0f) {
+        return false;
+    }
+    // V must not be larger than K
+    return bpw_v <= bpw_k;
+}
+
+static void common_warn_kv_cache_types(const char * label, ggml_type type_k, ggml_type type_v) {
+    if (type_k == GGML_TYPE_F16 && type_v == GGML_TYPE_F16) {
+        return;
+    }
+    if (!common_fattn_vec_has_instance(type_k, type_v)) {
+        LOG_WRN("WARNING: %s KV cache types K=%s V=%s have no optimized VEC flash-attention kernel compiled.\n"
+                "  Decode will use a slower f16-dequant fallback path.\n"
+                "  To fix, either:\n"
+                "    - Switch to a supported combo (turbo types pair with f16/q8_0/turbo*; standard types need matching K=V without FA_ALL_QUANTS)\n"
+                "    - Build with -DGGML_CUDA_FA_ALL_QUANTS=ON (adds all combos, increases build time)\n"
+                "    - Add the specific instance to ggml/src/ggml-cuda/CMakeLists.txt lines 120-145\n",
+                label, ggml_type_name(type_k), ggml_type_name(type_v));
+    }
+}
+
 common_init_result::common_init_result(common_params & params, bool model_only) :
     pimpl(new impl{}) {
     auto mparams = common_model_params_to_llama(params);
     auto cparams = common_context_params_to_llama(params);
+
+    if (params.flash_attn_type != LLAMA_FLASH_ATTN_TYPE_DISABLED) {
+        common_warn_kv_cache_types("main", params.cache_type_k, params.cache_type_v);
+        if (params.speculative.draft.cache_type_k != GGML_TYPE_F16 || params.speculative.draft.cache_type_v != GGML_TYPE_F16) {
+            common_warn_kv_cache_types("spec-draft", params.speculative.draft.cache_type_k, params.speculative.draft.cache_type_v);
+        }
+    }
 
     if (params.fit_params) {
         COM_TRC("%s", "fitting params to device memory ...\n");
