@@ -25,6 +25,17 @@ A few options to get `llama.cpp` installed on your machine:
 - Download pre-built binaries from the [releases page](https://github.com/ggml-org/llama.cpp/releases)
 - Build from source by cloning this repository - check out [our build guide](docs/build.md)
 
+### TurboQuant+ prebuilt binaries
+
+The latest TurboQuant+ prebuilds are published on the [TurboQuant+ tqp-v0.2.0 release](https://github.com/TheTom/llama-cpp-turboquant/releases/tag/tqp-v0.2.0). This release includes the PR #197 turbo KV work plus the Apple Silicon Metal startup-crash fix from PR #200.
+
+| Platform | Download | Notes |
+|---|---|---|
+| macOS Apple Silicon | [turboquant-plus-tqp-v0.2.0-macos-arm64-metal.tar.gz](https://github.com/TheTom/llama-cpp-turboquant/releases/download/tqp-v0.2.0/turboquant-plus-tqp-v0.2.0-macos-arm64-metal.tar.gz) | Metal build for arm64 Macs |
+| Windows x64 NVIDIA | [turboquant-plus-tqp-v0.2.0-windows-x64-cuda12.4.zip](https://github.com/TheTom/llama-cpp-turboquant/releases/download/tqp-v0.2.0/turboquant-plus-tqp-v0.2.0-windows-x64-cuda12.4.zip) | CUDA 12.4 build with CUDA runtime DLLs bundled |
+
+For Linux, ROCm/HIP, Vulkan, or custom CUDA architectures, build from source: standard llama.cpp build flags apply, and TurboQuant types become available automatically once the matching backend is compiled in.
+
 Once installed:
 
 ```sh
