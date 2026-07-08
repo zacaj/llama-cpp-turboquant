@@ -33,6 +33,7 @@ services:
         environment:
             - TURBO_AUTO_ASYMMETRIC=0
             - GGML_TQ_NATIVE=1
+            # - TURBO_LAYER_ADAPTIVE=1/2
             # - GGML_CUDA_FORCE_MMQ=1
         # ── -ctk / -ctv quick-reference (all entries >90% quality vs f16/f16) ───
         # All speed deltas are vs f16 decode (CUDA); long-ctx = attention-bandwidth-bound regime.
@@ -181,33 +182,40 @@ services:
         # spec2 8k t3/t3 27-42%, 52t/s
         # spec2 8k t3/t2 25-32%, 49t/s
         # spec2 8k t2/t2 27-42%, 52t/s
+        # 150k q8/t3 spec2 8k t3/t3 u128: 65tg 830pe
 
         # spec2 40k q8/q8 25-40%, 47t/s
         # spec2 40k q8/t2 33%, 54t/s
         # spec2 40k t2/t2 25%, 49t/s
 
         # better with opus            best local @210 opus
-        # command: >
-        #      --server --host 0.0.0.0 --port 8080 --jinja
-        #      --n-gpu-layers 99
-        #      -lv 4 --log-timestamps --log-colors on
-        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
-        #      --cache-prompt --cache-ram -1
-        #      -m /models/Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.gguf --alias "Qwen3.6-35B-A3B"  
-        #      --n-cpu-moe 0  
-        #      --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
-        #      --ctx-size 210000 
-        #      -b 2048 -ub 128
-        #      --repeat-penalty 1.0
-        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
-        #      --flash-attn on 
-        #      --keep 20000 --context-shift
-        #      -ctk q8_0 -ctv turbo3 --kv-unified 
-        #      --spec-draft-type-k turbo3
-        #      --spec-draft-type-v turbo3
-        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
-        #      --spec-type draft-mtp --spec-draft-n-max 2
-        #      --spec-draft-ctx-size 8192
+        command: >
+             --server --host 0.0.0.0 --port 8080 --jinja
+             --n-gpu-layers 99
+             -lv 4 --log-timestamps --log-colors on
+             --checkpoint-min-step 4000 --ctx-checkpoints 32
+             --cache-prompt --cache-ram -1
+             -m /models/Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.gguf --alias "Qwen3.6-35B-A3B"  
+             --n-cpu-moe 0
+             --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
+             --ctx-size 150000 
+             -b 2048 -ub 128
+             --repeat-penalty 1.0 
+             --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+             --flash-attn on 
+             --keep 20000 --context-shift
+             -ctk q8_0 -ctv turbo3 --kv-unified 
+             --spec-draft-type-k turbo3
+             --spec-draft-type-v turbo3
+             --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+             --spec-type draft-mtp --spec-draft-n-max 2
+             --spec-draft-ctx-size 8192
+            #  --moe-profile-dir /logs/moe-profiles/
+            #  --frequency-penalty 0.1 
+            #  --dry-multiplier 0.5
+            #  --dry-penalty-last-n 256
+            #  -m /models/Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.gguf --alias "Qwen3.6-35B-A3B"  
+
             #  -m /models/Qwen3.6-35B-A3B-UD-IQ3_XXS-MTP.gguf --alias "Qwen3.6-35B-A3B"  
 # command: >
         #     --server --host 0.0.0.0 --port 8080 --jinja
@@ -661,33 +669,37 @@ services:
         # MTP
         # spec1 100k q8/t3 u128: 100t/s, 70% | 1400p, 66-70e 70%
         # spec2 100k q8/t3 u128: 115t/s, 60% | 1400p, 70-75e 57%
-        # spec3 150k q8/t3 u128: 100-115t/s, 50% | 1400p, 72-76e 50%
+        # spec3 150k q8/t3 u128: 100-115t/s, 50% | 1400p, 72-76e 50%   loopy
         # spec4 100k q8/t3 u128: 100-120t/s, 52% | 1400p, 66-67e 45%
 
         # gemma-4-26B-A4B-it-Claude-Opus-Distill.q3_k_m-teichAI  | 0260625_023924_548006.json
         # 150k q8/t3 u128: 88t/s | 1300p, 52e
-        command: >
-             --server --host 0.0.0.0 --port 8080 --jinja
-             --n-gpu-layers 99
-             -lv 4 --log-timestamps --log-colors on
-             --checkpoint-min-step 4000 --ctx-checkpoints 32
-             --cache-prompt --cache-ram -1
-             -m /models/gemma-4-26B-A4B-it-UD-Q3_K_XL.gguf --alias "Qwen3.6-35B-A3B"  
-             --n-cpu-moe 0  
-             --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.01
-             --ctx-size 150000 
-             -b 2048 -ub 128
-             --repeat-penalty 1.0
-             --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
-             --flash-attn on 
-             --keep 20000 --context-shift
-             -ctk q8_0 -ctv turbo3 --kv-unified 
-             --spec-draft-type-k turbo3
-             --spec-draft-type-v turbo3
-             --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
-             --spec-type draft-mtp --spec-draft-n-max 3
-             --spec-draft-ctx-size 8192
-             --spec-draft-model /models/gemma-4-26B-A4B-it-Q8_0-MTP-unsloth.gguf
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      --n-gpu-layers 99
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models/gemma-4-26B-A4B-it-UD-IQ3_S-unsloth.gguf.gguf --alias "Qwen3.6-35B-A3B"  
+        #      --n-cpu-moe 0  
+        #      --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.01
+        #      --ctx-size 200000 
+        #      -b 2048 -ub 128
+        #      --repeat-penalty 1.1 --repeat-last-n 256 --frequency-penalty 0.2
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on 
+        #      --keep 20000 --context-shift
+        #      -ctk q8_0 -ctv turbo3 --kv-unified 
+        #      --spec-draft-type-k turbo3
+        #      --spec-draft-type-v turbo3
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 3
+        #      --spec-draft-ctx-size 8192
+        #      --spec-draft-model /models/gemma-4-26B-A4B-it-Q8_0-MTP-unsloth.gguf
+        #      --dry-multiplier 0.8
+        #      --dry-base 1.75
+        #      --dry-allowed-length 2
+        #      --dry-penalty-last-n 256
 
     prompt-logger:
         image: python:3-slim
