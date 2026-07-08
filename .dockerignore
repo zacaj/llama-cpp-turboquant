@@ -1,7 +1,8 @@
 *.o
 *.a
 .cache/
-# Do not ignore .git directory, otherwise the reported build number will always be 0
+# .git is excluded; commit info is passed via --build-arg GIT_COMMIT / GIT_COUNT instead
+.git/
 .github/
 .gitignore
 .vs/

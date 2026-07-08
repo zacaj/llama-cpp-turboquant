@@ -9,6 +9,8 @@ services:
             target: full
             args:
                 CUDA_DOCKER_ARCH: "120"
+                GIT_COMMIT: "${GIT_COMMIT:-unknown}"
+                GIT_COUNT: "${GIT_COUNT:-0}"
         deploy:
             resources:
                 reservations:

@@ -30,6 +30,9 @@ FROM ${BASE_CUDA_DEV_CONTAINER} AS build
 ARG GCC_VERSION
 # CUDA architecture to build for (defaults to all supported archs)
 ARG CUDA_DOCKER_ARCH=default
+# Git commit info passed from host (avoids needing .git in build context)
+ARG GIT_COMMIT=unknown
+ARG GIT_COUNT=0
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -52,7 +55,8 @@ RUN --mount=type=cache,target=/app/build \
     -DGGML_NATIVE=ON -DGGML_CUDA=ON -DGGML_BACKEND_DL=OFF -DGGML_CPU_ALL_VARIANTS=OFF \
     -DGGML_CUDA_FA_ALL_QUANTS=OFF \
     -DLLAMA_BUILD_TESTS=OFF ${CMAKE_ARGS} -DLLAMA_BUILD_RPC=ON -DGGML_RPC=ON \
-    -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined . && \
+    -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined \
+    -DLLAMA_BUILD_COMMIT=${GIT_COMMIT} -DLLAMA_BUILD_NUMBER=${GIT_COUNT} . && \
     cmake --build build --config Release -j$(nproc)
 
 RUN --mount=type=cache,target=/app/build \
