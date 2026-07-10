@@ -118,6 +118,7 @@ if (CUDAToolkit_FOUND)
         add_compile_definitions(GGML_CUDA_FA_ALL_QUANTS)
     else()
         # All K/V pairs from q8_0 down to turbo2, where V bpw <= K bpw.
+        # Keep in sync with ggml_cuda_fa_kv_pair_supported and the vec dispatch table in fattn.cu.
         # To add more combos (f16, bf16, etc.), build with -DGGML_CUDA_FA_ALL_QUANTS=ON.
         list(APPEND GGML_SOURCES_CUDA
             # K=q8_0 (8.0 bpw)

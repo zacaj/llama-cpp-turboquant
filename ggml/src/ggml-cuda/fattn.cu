@@ -610,7 +610,8 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
 
     GGML_ABORT("fatal error, GGML_CUDA_FA_ALL_QUANTS missing quant: K=%s V=%s", ggml_type_name(K->type), ggml_type_name(V->type));
 #else
-    // All K/V pairs from q8_0 down to turbo2, where V bpw <= K bpw
+    // All K/V pairs from q8_0 down to turbo2, where V bpw <= K bpw.
+    // Keep in sync with ggml_cuda_fa_kv_pair_supported and CMakeLists.txt (else branch).
     // K=q8_0
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_BF16, GGML_TYPE_BF16)
@@ -699,31 +700,40 @@ enum best_fattn_kernel {
     BEST_FATTN_KERNEL_MMA_F16 = 400,
 };
 
-static bool ggml_cuda_fattn_kv_type_supported(ggml_type type) {
-    switch (type) {
-        case GGML_TYPE_F32:
-        case GGML_TYPE_F16:
-            return true;
-        case GGML_TYPE_Q4_1:
-        case GGML_TYPE_Q5_0:
-        case GGML_TYPE_Q5_1:
+// Curated set of quantized/turbo (K, V) FA cache-type pairs this build fast-paths on CUDA.
+// SINGLE SOURCE OF TRUTH: keep identical to the compiled instance list in
+// ggml/src/ggml-cuda/CMakeLists.txt (else branch) and the FATTN_VEC_CASES_ALL_D table in
+// ggml_cuda_flash_attn_ext_vec (else branch). Pure f16/bf16/f32 pairs use the standard path
+// and are not listed here.
 #ifndef GGML_CUDA_FA_ALL_QUANTS
-            return false;
-#endif // GGML_CUDA_FA_ALL_QUANTS
-        case GGML_TYPE_Q4_0:
+static bool ggml_cuda_fa_kv_pair_supported(ggml_type k, ggml_type v) {
+    switch (k) {
         case GGML_TYPE_Q8_0:
-        case GGML_TYPE_BF16:
-            return true;
-        case GGML_TYPE_TURBO2_0:
-        case GGML_TYPE_TURBO3_0:
+            return v == GGML_TYPE_Q8_0 || v == GGML_TYPE_Q5_1 || v == GGML_TYPE_Q5_0 || v == GGML_TYPE_Q4_1 ||
+                   v == GGML_TYPE_TURBO4_0 || v == GGML_TYPE_Q4_0 || v == GGML_TYPE_TURBO3_0 || v == GGML_TYPE_TURBO2_0;
+        case GGML_TYPE_Q5_1:
+            return v == GGML_TYPE_Q5_1 || v == GGML_TYPE_Q5_0 || v == GGML_TYPE_Q4_1 ||
+                   v == GGML_TYPE_TURBO4_0 || v == GGML_TYPE_Q4_0 || v == GGML_TYPE_TURBO3_0 || v == GGML_TYPE_TURBO2_0;
+        case GGML_TYPE_Q5_0:
+            return v == GGML_TYPE_Q5_0 || v == GGML_TYPE_Q4_1 ||
+                   v == GGML_TYPE_TURBO4_0 || v == GGML_TYPE_Q4_0 || v == GGML_TYPE_TURBO3_0 || v == GGML_TYPE_TURBO2_0;
+        case GGML_TYPE_Q4_1:
+            return v == GGML_TYPE_Q4_1 ||
+                   v == GGML_TYPE_TURBO4_0 || v == GGML_TYPE_Q4_0 || v == GGML_TYPE_TURBO3_0 || v == GGML_TYPE_TURBO2_0;
         case GGML_TYPE_TURBO4_0:
-            // turbo KV types; head-dim geometry is validated separately in
-            // ggml_cuda_get_best_fattn_kernel (multiples of 64 only)
-            return true;
+            return v == GGML_TYPE_TURBO4_0 || v == GGML_TYPE_Q4_1 || v == GGML_TYPE_Q4_0 ||
+                   v == GGML_TYPE_TURBO3_0 || v == GGML_TYPE_TURBO2_0;
+        case GGML_TYPE_Q4_0:
+            return v == GGML_TYPE_Q4_0 || v == GGML_TYPE_TURBO3_0 || v == GGML_TYPE_TURBO2_0;
+        case GGML_TYPE_TURBO3_0:
+            return v == GGML_TYPE_TURBO3_0 || v == GGML_TYPE_TURBO2_0;
+        case GGML_TYPE_TURBO2_0:
+            return v == GGML_TYPE_TURBO2_0 || v == GGML_TYPE_Q8_0;
         default:
             return false;
     }
 }
+#endif // GGML_CUDA_FA_ALL_QUANTS
 
 static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const ggml_tensor * dst) {
 #ifndef FLASH_ATTN_AVAILABLE
@@ -815,25 +825,45 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     }
 
 #ifndef GGML_CUDA_FA_ALL_QUANTS
-    if (K->type != V->type) {
-        // Allow mixed KV types for combinations that have FA template instances compiled in:
-        // - turbo2/3/4 + q8_0 (turbo cache work)
-        // - f16/bf16 + q8_0 (common K=f16, V=q8_0 setup)
-        auto is_kv_compat = [](ggml_type t) {
-            return t == GGML_TYPE_TURBO2_0 || t == GGML_TYPE_TURBO3_0 || t == GGML_TYPE_TURBO4_0
-                || t == GGML_TYPE_Q8_0 || t == GGML_TYPE_F16 || t == GGML_TYPE_BF16;
-        };
-        if (!is_kv_compat(K->type) || !is_kv_compat(V->type)) {
-            return BEST_FATTN_KERNEL_NONE;
+    // Gate quantized/turbo KV cache pairs against the curated fast-path set. If the user selected a
+    // compressed KV cache whose (K, V) pair is not compiled in, abort loudly instead of returning
+    // NONE: NONE makes ggml_cuda_flash_attn_ext_supported() report false, which lets the scheduler
+    // silently offload the whole FA op to the CPU (~30 t/s with the GPU idle). Pure f16/bf16/f32
+    // pairs are handled by the standard path below and are not gated here.
+    {
+        const bool k_std = K->type == GGML_TYPE_F16 || K->type == GGML_TYPE_BF16 || K->type == GGML_TYPE_F32;
+        const bool v_std = V->type == GGML_TYPE_F16 || V->type == GGML_TYPE_BF16 || V->type == GGML_TYPE_F32;
+        if ((!k_std || !v_std) && !ggml_cuda_fa_kv_pair_supported(K->type, V->type)) {
+            GGML_ABORT("flash attention: KV cache pair K=%s V=%s is not a compiled fast-path combo; "
+                       "change -ctk/-ctv, or add the pair to CMakeLists.txt, the vec dispatch table, "
+                       "and ggml_cuda_fa_kv_pair_supported, then rebuild",
+                       ggml_type_name(K->type), ggml_type_name(V->type));
         }
     }
 #endif // GGML_CUDA_FA_ALL_QUANTS
 
-    if (!ggml_cuda_fattn_kv_type_supported(K->type) || !ggml_cuda_fattn_kv_type_supported(V->type)) {
-        return BEST_FATTN_KERNEL_NONE;
+    switch (K->type) {
+        case GGML_TYPE_F32:
+        case GGML_TYPE_F16:
+            break;
+        case GGML_TYPE_Q4_1:
+        case GGML_TYPE_Q5_0:
+        case GGML_TYPE_Q5_1:
+        case GGML_TYPE_Q4_0:
+        case GGML_TYPE_Q8_0:
+        case GGML_TYPE_BF16:
+            // quant K acceptance is gated by ggml_cuda_fa_kv_pair_supported above
+            break;
+        case GGML_TYPE_TURBO3_0:
+        case GGML_TYPE_TURBO2_0:
+        case GGML_TYPE_TURBO4_0:
+            break;
+        default:
+            return BEST_FATTN_KERNEL_NONE;
     }
 
-    // turbo VEC/MMA kernels are instantiated for head dims that are multiples of 64
+    // turbo VEC/MMA kernels are instantiated for head dims that are multiples of 64; K and V can
+    // have independent turbo types (e.g. mixed K=std/V=turbo), so both are checked here.
     {
         auto is_turbo = [](ggml_type t) {
             return t == GGML_TYPE_TURBO2_0 || t == GGML_TYPE_TURBO3_0 || t == GGML_TYPE_TURBO4_0;
