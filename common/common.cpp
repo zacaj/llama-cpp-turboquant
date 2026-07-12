@@ -1246,6 +1246,7 @@ static float common_kv_type_bpw(ggml_type type) {
         case GGML_TYPE_F16:      return 16.0f;
         case GGML_TYPE_BF16:     return 16.0f;
         case GGML_TYPE_Q8_0:     return  8.0f;
+        case GGML_TYPE_Q6_0:     return  6.0f;
         case GGML_TYPE_Q5_1:     return  5.5f;
         case GGML_TYPE_Q5_0:     return  5.0f;
         case GGML_TYPE_Q4_1:     return  4.5f;

@@ -648,6 +648,18 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_Q4_1)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_TURBO4_0)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_Q4_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_TURBO3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_TURBO2_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_Q6_0)
+    // K=q6_0
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_Q6_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_Q5_1)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_Q5_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_Q4_1)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_TURBO4_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_Q4_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_TURBO3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_TURBO2_0)
     // K=q5_1
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_1, GGML_TYPE_Q5_1)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_1, GGML_TYPE_Q5_0)
@@ -710,6 +722,10 @@ static bool ggml_cuda_fa_kv_pair_supported(ggml_type k, ggml_type v) {
     switch (k) {
         case GGML_TYPE_Q8_0:
             return v == GGML_TYPE_Q8_0 || v == GGML_TYPE_Q5_1 || v == GGML_TYPE_Q5_0 || v == GGML_TYPE_Q4_1 ||
+                   v == GGML_TYPE_TURBO4_0 || v == GGML_TYPE_Q4_0 || v == GGML_TYPE_TURBO3_0 || v == GGML_TYPE_TURBO2_0 ||
+                   v == GGML_TYPE_Q6_0;
+        case GGML_TYPE_Q6_0:
+            return v == GGML_TYPE_Q6_0 || v == GGML_TYPE_Q5_1 || v == GGML_TYPE_Q5_0 || v == GGML_TYPE_Q4_1 ||
                    v == GGML_TYPE_TURBO4_0 || v == GGML_TYPE_Q4_0 || v == GGML_TYPE_TURBO3_0 || v == GGML_TYPE_TURBO2_0;
         case GGML_TYPE_Q5_1:
             return v == GGML_TYPE_Q5_1 || v == GGML_TYPE_Q5_0 || v == GGML_TYPE_Q4_1 ||
@@ -849,6 +865,7 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         case GGML_TYPE_Q4_1:
         case GGML_TYPE_Q5_0:
         case GGML_TYPE_Q5_1:
+        case GGML_TYPE_Q6_0:
         case GGML_TYPE_Q4_0:
         case GGML_TYPE_Q8_0:
         case GGML_TYPE_BF16:

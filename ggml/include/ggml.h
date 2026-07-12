@@ -438,7 +438,8 @@ extern "C" {
         GGML_TYPE_Q8_CR   = 48, // Q8_0 blocks of a ConvRot-rotated tensor
         GGML_TYPE_Q5_CR   = 49, // Q5_0 blocks of a ConvRot-rotated tensor
         GGML_TYPE_Q6_CR   = 50, // Q6_K blocks of a ConvRot-rotated tensor
-        GGML_TYPE_COUNT   = 51,
+        GGML_TYPE_Q6_0    = 51, // beellama-style Q6 KV cache: legacy block-32 quant (ggml_half d + 2-bit qh + 4-bit qs)
+        GGML_TYPE_COUNT   = 52,
     };
 
     // precision

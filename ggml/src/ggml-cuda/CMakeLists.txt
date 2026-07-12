@@ -143,6 +143,16 @@ if (CUDAToolkit_FOUND)
             template-instances/fattn-vec-instance-q8_0-q4_0.cu
             template-instances/fattn-vec-instance-q8_0-turbo3_0.cu
             template-instances/fattn-vec-instance-q8_0-turbo2_0.cu
+            template-instances/fattn-vec-instance-q8_0-q6_0.cu
+            # K=q6_0 (6.0 bpw)
+            template-instances/fattn-vec-instance-q6_0-q6_0.cu
+            template-instances/fattn-vec-instance-q6_0-q5_1.cu
+            template-instances/fattn-vec-instance-q6_0-q5_0.cu
+            template-instances/fattn-vec-instance-q6_0-q4_1.cu
+            template-instances/fattn-vec-instance-q6_0-turbo4_0.cu
+            template-instances/fattn-vec-instance-q6_0-q4_0.cu
+            template-instances/fattn-vec-instance-q6_0-turbo3_0.cu
+            template-instances/fattn-vec-instance-q6_0-turbo2_0.cu
             # K=q5_1 (5.5 bpw)
             template-instances/fattn-vec-instance-q5_1-q5_1.cu
             template-instances/fattn-vec-instance-q5_1-q5_0.cu
