@@ -1791,6 +1791,18 @@ static void kl_divergence(llama_context * ctx, const common_params & params) {
 
     const int first = n_ctx/2;
 
+    // kld_early_stop: track the running mean KLD across chunks and bail out once a quiet-streak
+    // counter (incremented when stderr < max(rel_stderr*|mean|, abs_floor), decremented with a
+    // floor of 0 otherwise) reaches kld_early_stop_min_quiet, instead of always burning through
+    // every chunk in the reference file. The pooled stderr itself is order-invariant (a function of
+    // accumulated sum/sum2/count, not a step-to-step delta), but the stopping decision is inherently
+    // sequential -- it only ever sees a prefix of chunks -- so a single hard chunk can still delay
+    // convergence depending where it lands; decrementing instead of hard-resetting the streak softens
+    // that without pretending a causal rule can fully undo not having seen the rest of the data yet.
+    int    quiet_count      = 0;
+    bool   converged_early  = false;
+    int    n_chunk_actual   = n_chunk;
+
     for (int i = 0; i < n_chunk; i += n_seq) {
         const int start =     i * n_ctx;
         const int end   = start + n_ctx;
@@ -1855,7 +1867,11 @@ static void kl_divergence(llama_context * ctx, const common_params & params) {
             }
             LOG("%.2f minutes\n", total_seconds / 60.0);
             LOG("\n");
-            LOG("chunk             PPL               ln(PPL(Q)/PPL(base))          KL Divergence              Δp RMS            Same top p\n");
+            LOG("chunk             PPL               ln(PPL(Q)/PPL(base))          KL Divergence              Δp RMS            Same top p");
+            if (params.kld_early_stop) {
+                LOG("        stderr/threshold quiet");
+            }
+            LOG("\n");
         }
 
         // Read log probs for each sequence in the batch
@@ -1898,16 +1914,63 @@ static void kl_divergence(llama_context * ctx, const common_params & params) {
             double p_top_unc = sqrt(p_top_val*(1 - p_top_val)/(kld.count - 1));
             LOG("    %6.3lf ± %6.3lf %%", 100.0*p_top_val, 100.0*p_top_unc);
 
+            // Print how close this chunk came to satisfying convergence, so the log itself shows
+            // the trajectory (not just the final "converged after N chunks" summary).
+            // Threshold is max(rel_stderr * |mean|, abs_floor) -- a pure relative bar is unreachable
+            // for near-lossless combos as mean_kld -> 0, so the absolute floor lets those converge
+            // on already-tiny absolute noise instead of chasing a relative ratio that can't shrink.
+            bool converged_now = false;
+            if (params.kld_early_stop) {
+                const double abs_mean = std::fabs(kl_div.first);
+                const double threshold = std::max((double)params.kld_early_stop_rel_stderr * abs_mean,
+                                                    (double)params.kld_early_stop_abs_floor);
+                const bool   precise_enough = kl_div.second > 0 && kl_div.second < threshold;
+                if (precise_enough) {
+                    quiet_count++;
+                } else {
+                    // Decrement (floor 0) instead of a hard reset: a single unlucky/hard chunk
+                    // costs one unit of progress, not all of it. A hard reset makes the stopping
+                    // decision needlessly fragile to exactly where in the sequence one bad chunk
+                    // happens to land -- see the min_quiet comment above.
+                    quiet_count = std::max(0, quiet_count - 1);
+                }
+                LOG("    stderr=%.5lf/%.5lf(thresh) quiet=%d/%d", kl_div.second, threshold, quiet_count, params.kld_early_stop_min_quiet);
+                converged_now = quiet_count >= params.kld_early_stop_min_quiet;
+            }
+
             LOG("\n");
+
+            if (converged_now) {
+                n_chunk_actual  = i + seq + 1;
+                converged_early = true;
+                break;
+            }
         }
 
         logits.clear();
+
+        if (converged_early) {
+            break;
+        }
     }
 
     llama_batch_free(batch);
     LOG("\n");
 
+    if (converged_early) {
+        LOG_INF("%s: kld_early_stop: converged after %d/%d chunks (quiet-streak %d reached, threshold max(%.3f*|mean|, %.5f))\n",
+                __func__, n_chunk_actual, n_chunk, params.kld_early_stop_min_quiet, params.kld_early_stop_rel_stderr, params.kld_early_stop_abs_floor);
+        const size_t actual_count = size_t(n_ctx - 1 - first) * n_chunk_actual;
+        kld_values.resize(actual_count);
+        p_diff_values.resize(actual_count);
+    }
+
     if (kld.count < 100) return; // we do not wish to do statistics on so few values
+
+    // keep unsorted, per-token-paired copies for --kld-dump-values (sorting below breaks the
+    // kld<->p_diff pairing since each vector is sorted independently)
+    const std::vector<float> kld_values_raw    = kld_values;
+    const std::vector<float> p_diff_values_raw = p_diff_values;
 
     std::sort(kld_values.begin(), kld_values.end());
     std::sort(p_diff_values.begin(), p_diff_values.end());
@@ -1958,11 +2021,16 @@ static void kl_divergence(llama_context * ctx, const common_params & params) {
         return (1 - p)*values[ip] + p*values[std::min(ip+1, values.size()-1)];
     };
 
+    const double kld_p999 = percentile(kld_values, 0.999f);
+    const double kld_p990 = percentile(kld_values, 0.990f);
+    const double kld_p950 = percentile(kld_values, 0.950f);
+    const double kld_p900 = percentile(kld_values, 0.900f);
+
     LOG("Maximum KLD: %10.6f\n", kld_values.back());
-    LOG("99.9%%   KLD: %10.6f\n", percentile(kld_values, 0.999f));
-    LOG("99.0%%   KLD: %10.6f\n", percentile(kld_values, 0.990f));
-    LOG("95.0%%   KLD: %10.6f\n", percentile(kld_values, 0.950f));
-    LOG("90.0%%   KLD: %10.6f\n", percentile(kld_values, 0.900f));
+    LOG("99.9%%   KLD: %10.6f\n", kld_p999);
+    LOG("99.0%%   KLD: %10.6f\n", kld_p990);
+    LOG("95.0%%   KLD: %10.6f\n", kld_p950);
+    LOG("90.0%%   KLD: %10.6f\n", kld_p900);
     LOG("Median  KLD: %10.6f\n", kld_median);
     LOG("10.0%%   KLD: %10.6f\n", percentile(kld_values, 0.100f));
     LOG(" 5.0%%   KLD: %10.6f\n", percentile(kld_values, 0.050f));
@@ -2003,6 +2071,43 @@ static void kl_divergence(llama_context * ctx, const common_params & params) {
 
     const double same_top_p = 1.0*kld.n_same_top/kld.count;
     LOG("Same top p: %6.3lf ± %5.3lf %%\n", 100.0*same_top_p, 100.0*sqrt(same_top_p*(1.0 - same_top_p)/(kld.count - 1)));
+
+    if (!params.kld_dump_values.empty()) {
+        std::ofstream dump_out(params.kld_dump_values, std::ios::binary);
+        if (dump_out.is_open()) {
+            const int count_per_chunk = n_ctx - 1 - first;
+            dump_out << "# kld-dump-values v1\n";
+            dump_out << "model=" << params.model.path << "\n";
+            dump_out << "ctk=" << ggml_type_name(params.cache_type_k) << "\n";
+            dump_out << "ctv=" << ggml_type_name(params.cache_type_v) << "\n";
+            dump_out << "reference_file=" << params.logits_file << "\n";
+            dump_out << "n_ctx=" << n_ctx << "\n";
+            dump_out << "n_vocab=" << n_vocab << "\n";
+            dump_out << "chunk_offset=0\n"; // reserved: nonzero once resumable/offset generation exists
+            dump_out << "n_chunk_requested=" << n_chunk << "\n";
+            dump_out << "n_chunk_actual=" << n_chunk_actual << "\n";
+            dump_out << "count_per_chunk=" << count_per_chunk << "\n";
+            dump_out << "converged_early=" << (converged_early ? 1 : 0) << "\n";
+            dump_out << "mean_kld=" << kl_div.first << "\n";
+            dump_out << "mean_kld_stderr=" << kl_div.second << "\n";
+            dump_out << "kld_p999=" << kld_p999 << "\n";
+            dump_out << "kld_p990=" << kld_p990 << "\n";
+            dump_out << "kld_p950=" << kld_p950 << "\n";
+            dump_out << "kld_p900=" << kld_p900 << "\n";
+            dump_out << "kld_median=" << kld_median << "\n";
+            dump_out << "ppl_q=" << ppl_val << "\n";
+            dump_out << "ppl_base=" << ppl_base_val << "\n";
+            dump_out << "mean_dp=" << p_diff.first << "\n";
+            dump_out << "same_top_p=" << same_top_p << "\n";
+            dump_out << "# end-metadata\n";
+            dump_out << "kld\tp_diff\n";
+            for (size_t idx = 0; idx < kld_values_raw.size(); ++idx) {
+                dump_out << kld_values_raw[idx] << "\t" << p_diff_values_raw[idx] << "\n";
+            }
+        } else {
+            LOG_ERR("%s: failed to open --kld-dump-values path %s\n", __func__, params.kld_dump_values.c_str());
+        }
+    }
 }
 
 // satisfies -Wmissing-declarations

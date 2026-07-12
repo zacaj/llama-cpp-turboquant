@@ -2474,6 +2474,48 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_examples({LLAMA_EXAMPLE_PERPLEXITY}));
     add_opt(common_arg(
+        {"--kld-dump-values"}, "FNAME",
+        "dump raw per-token KLD and p_diff values (plus chunk metadata) to FNAME, for pooling percentiles "
+        "across independent runs or extending a partial run later (requires --kl-divergence)",
+        [](common_params & params, const std::string & value) {
+            params.kld_dump_values = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_PERPLEXITY}));
+    add_opt(common_arg(
+        {"--kld-early-stop"},
+        "stop processing further chunks once the running mean KLD has stabilized "
+        "(see --kld-early-stop-rel-stderr, --kld-early-stop-abs-floor, --kld-early-stop-min-quiet)",
+        [](common_params & params) {
+            params.kld_early_stop = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_PERPLEXITY}));
+    add_opt(common_arg(
+        {"--kld-early-stop-rel-stderr"}, "F",
+        string_format("convergence threshold: relative stderr (stderr/|mean|) of the running mean KLD, "
+                      "order-invariant unlike a step-to-step delta (default: %.3f)", params.kld_early_stop_rel_stderr),
+        [](common_params & params, const std::string & value) {
+            params.kld_early_stop_rel_stderr = std::stof(value);
+        }
+    ).set_examples({LLAMA_EXAMPLE_PERPLEXITY}));
+    add_opt(common_arg(
+        {"--kld-early-stop-abs-floor"}, "F",
+        string_format("absolute stderr floor for convergence: actual threshold is max(rel_stderr*|mean|, "
+                      "abs_floor), so near-lossless combos (mean KLD near 0) can converge on absolute "
+                      "precision instead of an unreachable relative ratio (default: %.5f)", params.kld_early_stop_abs_floor),
+        [](common_params & params, const std::string & value) {
+            params.kld_early_stop_abs_floor = std::stof(value);
+        }
+    ).set_examples({LLAMA_EXAMPLE_PERPLEXITY}));
+    add_opt(common_arg(
+        {"--kld-early-stop-min-quiet"}, "N",
+        string_format("quiet-streak threshold to declare convergence; the streak counter increments on "
+                      "chunks within the stderr threshold and decrements (floor 0) otherwise, so isolated "
+                      "hard chunks cost one step, not the whole streak (default: %d)", params.kld_early_stop_min_quiet),
+        [](common_params & params, int value) {
+            params.kld_early_stop_min_quiet = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_PERPLEXITY}));
+    add_opt(common_arg(
         {"--ppl-stride"}, "N",
         string_format("stride for perplexity calculation (default: %d)", params.ppl_stride),
         [](common_params & params, int value) {

@@ -571,6 +571,31 @@ struct common_params {
 
     bool   kl_divergence    = false; // compute KL divergence
 
+    // kld_dump_values: path to dump raw per-token KLD + p_diff values (plus chunk metadata),
+    // so independent runs' raw values can be pooled/recombined externally (percentiles are not
+    // decomposable from summary stats alone) or used later to extend a partial run.
+    std::string kld_dump_values = "";
+    // kld_early_stop*: stop processing further chunks once the running mean KLD has stabilized,
+    // instead of always processing every chunk in the reference file. "Precise enough" means the
+    // current stderr drops under max(kld_early_stop_rel_stderr * |mean|, kld_early_stop_abs_floor).
+    // A quiet-streak counter increments on precise-enough chunks and decrements (floor 0, not a hard
+    // reset) otherwise; converged once it reaches kld_early_stop_min_quiet. Note: the pooled stat
+    // itself (mean/stderr for a *given* set of chunks) is order-invariant -- a function of
+    // accumulated sum/sum2/count, not a step-to-step delta -- but the STOPPING DECISION is not,
+    // since it's a sequential/online process that only ever sees a prefix of chunks; a hard reset
+    // made this needlessly fragile to exactly where in the sequence one hard chunk landed, which the
+    // decay softens but does not eliminate (no causal rule can undo not having seen the rest yet).
+    // rel_stderr default 0.03 calibrated empirically: at mean_kld~0.0064 the data clustered within
+    // ~0.0062-0.0066, i.e. ~3% relative stderr. abs_floor exists because a purely relative bar
+    // becomes nearly impossible to satisfy for near-lossless combos: as mean_kld -> 0, stderr/|mean|
+    // blows up even though the absolute noise is already tiny and well-resolved -- the floor (same
+    // ~0.0002 scale as the calibration point) lets those combos converge on absolute precision
+    // instead of chasing a relative ratio that can never shrink enough.
+    bool    kld_early_stop            = false;
+    float   kld_early_stop_rel_stderr = 0.03f;
+    float   kld_early_stop_abs_floor  = 0.0002f;
+    int32_t kld_early_stop_min_quiet  = 3;    // quiet-streak count (increments/decays, see above) needed to converge
+
     bool check             = false; // check rather than generate results for llama-results
 
     bool usage             = false; // print usage
