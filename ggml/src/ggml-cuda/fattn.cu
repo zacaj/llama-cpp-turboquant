@@ -609,6 +609,36 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q4_0,     GGML_TYPE_TURBO2_0)
 
     GGML_ABORT("fatal error, GGML_CUDA_FA_ALL_QUANTS missing quant: K=%s V=%s", ggml_type_name(K->type), ggml_type_name(V->type));
+#elif defined(GGML_CUDA_FA_USEFUL_QUANTS)
+    // Useful K/V pairs for KLD testing (from kld-run-matrix.sh PAIRS array)
+    // K=q8_0
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_Q6_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_Q5_1)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_Q5_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_Q4_1)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_TURBO4_0)
+    // K=q6_0
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_Q6_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_Q5_1)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_Q5_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_TURBO4_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q6_0, GGML_TYPE_Q4_0)
+    // K=q5_1
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_1, GGML_TYPE_Q5_1)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_1, GGML_TYPE_Q5_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_1, GGML_TYPE_TURBO4_0)
+    // K=q5_0
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_0, GGML_TYPE_Q5_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_0, GGML_TYPE_Q4_1)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q5_0, GGML_TYPE_TURBO4_0)
+    // K=turbo4
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO4_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO4_0, GGML_TYPE_Q4_0)
+    // K=turbo3
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO3_0)
+
+    GGML_ABORT("fatal error, GGML_CUDA_FA_USEFUL_QUANTS missing quant: K=%s V=%s", ggml_type_name(K->type), ggml_type_name(V->type));
 #else
     // All K/V pairs from q8_0 down to turbo2, where V bpw <= K bpw.
     // Keep in sync with ggml_cuda_fa_kv_pair_supported and CMakeLists.txt (else branch).
@@ -700,7 +730,7 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO2_0, GGML_TYPE_Q8_0) // Boundary V auto-protection upgrades V to q8_0 on sensitive layers
 
     GGML_ABORT("fatal error, KV quant not supported: K=%s V=%s", ggml_type_name(K->type), ggml_type_name(V->type));
-#endif // GGML_CUDA_FA_ALL_QUANTS
+#endif // GGML_CUDA_FA_ALL_QUANTS / USEFUL_QUANTS / default
 
 }
 
@@ -717,7 +747,28 @@ enum best_fattn_kernel {
 // ggml/src/ggml-cuda/CMakeLists.txt (else branch) and the FATTN_VEC_CASES_ALL_D table in
 // ggml_cuda_flash_attn_ext_vec (else branch). Pure f16/bf16/f32 pairs use the standard path
 // and are not listed here.
-#ifndef GGML_CUDA_FA_ALL_QUANTS
+#ifdef GGML_CUDA_FA_USEFUL_QUANTS
+static bool ggml_cuda_fa_kv_pair_supported(ggml_type k, ggml_type v) {
+    switch (k) {
+        case GGML_TYPE_Q8_0:
+            return v == GGML_TYPE_Q8_0 || v == GGML_TYPE_Q6_0 || v == GGML_TYPE_Q5_1 || v == GGML_TYPE_Q5_0 ||
+                   v == GGML_TYPE_Q4_1 || v == GGML_TYPE_TURBO4_0;
+        case GGML_TYPE_Q6_0:
+            return v == GGML_TYPE_Q6_0 || v == GGML_TYPE_Q5_1 || v == GGML_TYPE_Q5_0 ||
+                   v == GGML_TYPE_TURBO4_0 || v == GGML_TYPE_Q4_0;
+        case GGML_TYPE_Q5_1:
+            return v == GGML_TYPE_Q5_1 || v == GGML_TYPE_Q5_0 || v == GGML_TYPE_TURBO4_0;
+        case GGML_TYPE_Q5_0:
+            return v == GGML_TYPE_Q5_0 || v == GGML_TYPE_Q4_1 || v == GGML_TYPE_TURBO4_0;
+        case GGML_TYPE_TURBO4_0:
+            return v == GGML_TYPE_TURBO4_0 || v == GGML_TYPE_Q4_0;
+        case GGML_TYPE_TURBO3_0:
+            return v == GGML_TYPE_TURBO3_0;
+        default:
+            return false;
+    }
+}
+#elif !defined(GGML_CUDA_FA_ALL_QUANTS)
 static bool ggml_cuda_fa_kv_pair_supported(ggml_type k, ggml_type v) {
     switch (k) {
         case GGML_TYPE_Q8_0:
@@ -749,7 +800,7 @@ static bool ggml_cuda_fa_kv_pair_supported(ggml_type k, ggml_type v) {
             return false;
     }
 }
-#endif // GGML_CUDA_FA_ALL_QUANTS
+#endif
 
 static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const ggml_tensor * dst) {
 #ifndef FLASH_ATTN_AVAILABLE

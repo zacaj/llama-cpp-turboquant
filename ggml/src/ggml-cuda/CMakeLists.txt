@@ -116,6 +116,38 @@ if (CUDAToolkit_FOUND)
         file(GLOB   SRCS "template-instances/fattn-vec*.cu")
         list(APPEND GGML_SOURCES_CUDA ${SRCS})
         add_compile_definitions(GGML_CUDA_FA_ALL_QUANTS)
+    elseif (GGML_CUDA_FA_USEFUL_QUANTS)
+        # Useful K/V pairs for KLD testing (from kld-run-matrix.sh PAIRS array).
+        # Keep in sync with ggml_cuda_fa_kv_pair_supported and the vec dispatch table in fattn.cu.
+        add_compile_definitions(GGML_CUDA_FA_USEFUL_QUANTS)
+        list(APPEND GGML_SOURCES_CUDA
+            # K=q8_0 (8.0 bpw)
+            template-instances/fattn-vec-instance-q8_0-q8_0.cu
+            template-instances/fattn-vec-instance-q8_0-q6_0.cu
+            template-instances/fattn-vec-instance-q8_0-q5_1.cu
+            template-instances/fattn-vec-instance-q8_0-q5_0.cu
+            template-instances/fattn-vec-instance-q8_0-q4_1.cu
+            template-instances/fattn-vec-instance-q8_0-turbo4_0.cu
+            # K=q6_0 (6.0 bpw)
+            template-instances/fattn-vec-instance-q6_0-q6_0.cu
+            template-instances/fattn-vec-instance-q6_0-q5_1.cu
+            template-instances/fattn-vec-instance-q6_0-q5_0.cu
+            template-instances/fattn-vec-instance-q6_0-turbo4_0.cu
+            template-instances/fattn-vec-instance-q6_0-q4_0.cu
+            # K=q5_1 (5.5 bpw)
+            template-instances/fattn-vec-instance-q5_1-q5_1.cu
+            template-instances/fattn-vec-instance-q5_1-q5_0.cu
+            template-instances/fattn-vec-instance-q5_1-turbo4_0.cu
+            # K=q5_0 (5.0 bpw)
+            template-instances/fattn-vec-instance-q5_0-q5_0.cu
+            template-instances/fattn-vec-instance-q5_0-q4_1.cu
+            template-instances/fattn-vec-instance-q5_0-turbo4_0.cu
+            # K=turbo4 (~4.5 bpw)
+            template-instances/fattn-vec-instance-turbo4_0-turbo4_0.cu
+            template-instances/fattn-vec-instance-turbo4_0-q4_0.cu
+            # K=turbo3 (~3.5 bpw)
+            template-instances/fattn-vec-instance-turbo3_0-turbo3_0.cu
+        )
     else()
         # All K/V pairs from q8_0 down to turbo2, where V bpw <= K bpw.
         # Keep in sync with ggml_cuda_fa_kv_pair_supported and the vec dispatch table in fattn.cu.
