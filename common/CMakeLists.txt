@@ -84,6 +84,8 @@ add_library(${TARGET}
     llguidance.cpp
     log.cpp
     log.h
+    kv-cache-lru.cpp
+    kv-cache-lru.h
     ngram-cache.cpp
     ngram-cache.h
     ngram-map.cpp

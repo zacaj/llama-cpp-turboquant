@@ -310,6 +310,10 @@ if (APPLE)
     llama_build(test-rset-release.cpp)
 endif()
 
+# Test LRU KV cache manager
+llama_build_and_test(test-kv-cache-lru.cpp LABEL "model" ARGS "${MODEL_DEST}")
+set_tests_properties(test-kv-cache-lru PROPERTIES FIXTURES_REQUIRED test-download-model)
+
 if (NOT GGML_BACKEND_DL)
     # these tests use the backends directly and cannot be built with dynamic loading
     llama_build_and_test(test-barrier.cpp)
