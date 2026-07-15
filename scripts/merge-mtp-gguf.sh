@@ -27,10 +27,7 @@ resolve() {
     case "$p" in
         "$MODELS_DIR"/*)  echo "/models/${p#"$MODELS_DIR"/}" ;;
         "$ARCHIVE_DIR"/*) echo "/archive/${p#"$ARCHIVE_DIR"/}" ;;
-        /*)
-            echo "ERROR: $p is outside MODELS_DIR ($MODELS_DIR) and ARCHIVE_DIR ($ARCHIVE_DIR) -- not visible in the container" >&2
-            exit 1
-            ;;
+        /*) echo "$p" ;;
         *) echo "/models/$p" ;;
     esac
 }
@@ -44,6 +41,8 @@ docker run --rm \
     -e PYTHONPATH=/app/gguf-py \
     -v "$MODELS_DIR":/models \
     -v "$ARCHIVE_DIR":/archive \
+    -v "$TARGET":"$TARGET:ro" \
+    -v "$SOURCE":"$SOURCE:ro" \
     -v "$REPO_DIR/scripts":/host-scripts:ro \
     "$IMAGE" \
     /host-scripts/merge_mtp_gguf.py "$TARGET_ARG" "$SOURCE_ARG" "$OUTPUT_ARG" "${EXTRA_ARGS[@]}"

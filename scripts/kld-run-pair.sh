@@ -108,6 +108,7 @@ if ! docker run --rm --gpus all \
     -v "$MODELS_DIR":/models \
     -v "$CORPUS_DIR":/corpus:ro \
     -v "$OUTPUT_DIR":/output \
+    -v "$REF":"$REF" \
     -v "$DUMP_DIR":/dumpout \
     "$IMAGE" \
     --perplexity -m "/models/$MODEL" \

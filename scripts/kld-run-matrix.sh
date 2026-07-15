@@ -32,7 +32,7 @@ if [ "$CTX" -lt 1000 ]; then
     echo "Usage: kld-run-matrix.sh <model-filename> <reference-file> [ctx] [chunks] [results-file]" >&2
     exit 1
 fi
-RESULTS="${5:-/mnt/llm/models/kld-reference/$(basename "$MODEL" .gguf)-matrix-${CTX}ctx.tsv}"
+RESULTS="${5:-${OUTPUT_DIR}/$(basename "$MODEL" .gguf)-matrix-${CTX}ctx.tsv}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -50,7 +50,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # higher value pairs for quicker runs
 PAIRS=(
     "q8_0 q8_0" "q8_0 q6_0" "q8_0 q5_1" "q8_0 q5_0" "q8_0 q4_1" "q8_0 turbo4" #"q8_0 turbo3" "q8_0 turbo2" #"q8_0 q4_0" 
-    "q6_0 q6_0" "q6_0 q5_1" "q6_0 q5_0"  "q6_0 turbo4" "q6_0 q4" #"q6_0 turbo3" #"q6_0 turbo2" "q6_0 q4_1"
+    "q6_0 q6_0" "q6_0 q5_1" "q6_0 q5_0"  "q6_0 turbo4" "q6_0 q4_0" #"q6_0 turbo3" #"q6_0 turbo2" "q6_0 q4_1"
     "q5_1 q5_1" "q5_1 q5_0"  "q5_1 turbo4" #"q5_1 q4_0" #"q5_1 turbo3" #"q5_1 turbo2""q5_1 q4_1"
     "q5_0 q5_0" "q5_0 q4_1" "q5_0 turbo4"  #"q5_0 turbo3" # "q5_0 turbo2" "q5_0 q4_0"
     #"q4_1 q4_1"  "q4_1 q4_0" #"q4_1 turbo3" #"q4_1 turbo2" "q4_1 turbo4"
