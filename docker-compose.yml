@@ -392,11 +392,40 @@ services:
         #      --spec-draft-type-k turbo3
         #      --spec-draft-type-v turbo3
         #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
-        #      --spec-type draft-mtp,ngram-mod --spec-draft-n-max 2
+        #      --spec-type draft-mtp,ngram-mod --spec-draft-n-max 3
         #      --spec-draft-ctx-size 8192
         #      --spec-ngram-mod-n-match 16
         #      --spec-ngram-mod-n-min 8
         #      --spec-ngram-mod-n-max 24
+        # 27b - creative
+        # 100k q5/q5 spec2-0.75 dry+xtx+freq 28tg 78% | 40-70% 18tg 686pe
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      --n-gpu-layers 99
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models/Qwen3.6-27B-UD-IQ3_XXS-MTP-unsloth.gguf --alias "Qwen3.6-35B-A3B"  
+        #      --n-cpu-moe 0
+        #      --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      --ctx-size 100000 
+        #      -b 2048 -ub 128
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on 
+        #      --keep 20000 --context-shift
+        #      -ctk q5_1 -ctv q5_0 --kv-unified 
+        #      --spec-draft-type-k turbo3
+        #      --spec-draft-type-v turbo3
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp,ngram-mod --spec-draft-n-max 3
+        #      --spec-draft-ctx-size 8192
+        #      --spec-draft-p-min 0.75
+        #      --spec-ngram-mod-n-match 16
+        #      --spec-ngram-mod-n-min 8
+        #      --spec-ngram-mod-n-max 24
+        #      --dry-multiplier 0.5 --dry-allowed-length 4 --dry-base 1.75 --dry-penalty-last-n 256
+        #      --xtc-probability 0.5 --xtc-threshold 0.1
+        #      --frequency-penalty 0.1 
 
         # Qwen3.5-9B-Q8_0-MTP-unsloth
         # 200k Q8 spec2 ng16 64tg 60%
@@ -426,32 +455,63 @@ services:
         #      --spec-ngram-mod-n-max 24
         #      --spec-draft-p-min 0.75
 
-        # Qwen3.5-4B
+        # Qwen3.5-9B
         command: >
              --server --host 0.0.0.0 --port 8080 --jinja --chat-template-file /models/chat_template.jinja
              --n-gpu-layers 99
              -lv 4 --log-timestamps --log-colors on
              --checkpoint-min-step 4000 --ctx-checkpoints 32
              --cache-prompt --cache-ram -1
-             -m /models/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf --alias "Qwen3.6-35B-A3B"  
+             -m /models/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-MTP-Q4_K_M.gguf --alias "Qwen3.6-35B-A3B"  
              --n-cpu-moe 0
              --temp 0.5 --top-p 0.95 --top-k 20 --min-p 0.01
-             --ctx-size 100000 
+             --ctx-size 80000 
              -b 2048 -ub 128
              --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
              --flash-attn on 
              --keep 20000 --context-shift
              -ctk q6_0 -ctv q6_0 --kv-unified 
-             --mmproj /models/mmproj-Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-BF16.gguf
-            #  --spec-draft-type-k q6_0
-            #  --spec-draft-type-v q6_0
-            #  --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
-            #  --spec-type draft-mtp,ngram-mod --spec-draft-n-max 4
-            #  --spec-draft-ctx-size 8192
-            #  --spec-ngram-mod-n-match 16
-            #  --spec-ngram-mod-n-min 8
-            #  --spec-ngram-mod-n-max 24
-            #  --spec-draft-p-min 0.75
+             --mmproj /models/Qwen3.5-9B-BF16-mmproj.gguf
+             --dry-multiplier 0.5 --dry-allowed-length 2 --dry-base 1.75 --dry-penalty-last-n 256
+             --spec-draft-type-k q6_0
+             --spec-draft-type-v q6_0
+             --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+             --spec-type draft-mtp,ngram-mod --spec-draft-n-max 3
+             --spec-draft-ctx-size 8192
+             --spec-ngram-mod-n-match 32
+             --spec-ngram-mod-n-min 8
+             --spec-ngram-mod-n-max 16
+            #  --xtc-probability 0.5 --xtc-threshold 0.1
+            #  --spec-draft-p-min 0.0
+        # # Qwen3.5-4B
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja --chat-template-file /models/chat_template.jinja
+        #      --n-gpu-layers 99
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf --alias "Qwen3.6-35B-A3B"  
+        #      --n-cpu-moe 0
+        #      --temp 0.5 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      --ctx-size 100000 
+        #      -b 2048 -ub 128
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on 
+        #      --keep 20000 --context-shift
+        #      -ctk q6_0 -ctv q6_0 --kv-unified 
+        #      --mmproj /models/mmproj-Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-BF16.gguf
+        #      --dry-multiplier 0.5 --dry-allowed-length 4 --dry-base 1.75 --dry-penalty-last-n 256
+        #      --xtc-probability 0.5 --xtc-threshold 0.1
+        #     #  --frequency-penalty 0.1 
+        #     #  --spec-draft-type-k q6_0
+        #     #  --spec-draft-type-v q6_0
+        #     #  --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #     #  --spec-type draft-mtp,ngram-mod --spec-draft-n-max 4
+        #     #  --spec-draft-ctx-size 8192
+        #     #  --spec-ngram-mod-n-match 16
+        #     #  --spec-ngram-mod-n-min 8
+        #     #  --spec-ngram-mod-n-max 24
+        #     #  --spec-draft-p-min 0.75
 
         # Qwen3.5-9B-MTP-unsloth-TQ3_1S
         # 100K 43t/s
