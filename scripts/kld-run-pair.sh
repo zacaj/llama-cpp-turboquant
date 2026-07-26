@@ -119,7 +119,7 @@ if ! docker run --rm --gpus all \
     -ctk "$CTK" -ctv "$CTV" -fit off \
     "${EARLY_STOP_ARGS[@]}" \
     --kld-dump-values "/dumpout/$DUMP_NAME" \
-    --kl-divergence-base "/output/$REF_BASENAME" --kl-divergence \
+    --kl-divergence-base "$REF" --kl-divergence \
     --n-gpu-layers 99 -lv 4 --log-timestamps > "$LOG" 2>&1; then
     fail
     exit 0
