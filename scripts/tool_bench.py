@@ -41,6 +41,7 @@ from typing import Annotated, Dict, List, Optional, Tuple
 import atexit
 import json
 import logging
+import csv
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -239,140 +240,168 @@ def run(
 
     assert force or append or not output.exists(), f"Output file already exists: {output}; use --force to overwrite"
 
-    with output.open('a' if append else 'w') as output_file:
+    tsv_output = output.with_suffix('.tsv')
+    tsv_exists = tsv_output.exists()
+    tsv_file = tsv_output.open('a')
+    tsv_writer = csv.DictWriter(
+        tsv_file,
+        fieldnames=['model', 'server_name', 'test', 'temp', 'success_ratio', 'avg_time', 'median_time', 'success_count', 'failure_count'],
+        delimiter='\t'
+    )
+    if not tsv_exists or (not append and output.exists()):
+        tsv_writer.writeheader()
 
-        def run(server: ServerProcess, *, server_name: str, model_id: str, temp: Optional[float] = None, output_kwargs={}, request_kwargs={}):
-            request_kwargs = {**request_kwargs}
-            if temp is not None:
-                request_kwargs['temperature'] = temp
-            if top_p is not None:
-                request_kwargs['top_p'] = top_p
-            if top_k is not None:
-                request_kwargs['top_k'] = top_k
-            if seed is not None:
-                request_kwargs['seed'] = seed
+    try:
+        with output.open('a' if append else 'w') as output_file:
 
-            request_kwargs['cache_prompt'] = False
+            def run(server: ServerProcess, *, server_name: str, model_id: str, temp: Optional[float] = None, output_kwargs={}, request_kwargs={}):
+                request_kwargs = {**request_kwargs}
+                if temp is not None:
+                    request_kwargs['temperature'] = temp
+                if top_p is not None:
+                    request_kwargs['top_p'] = top_p
+                if top_k is not None:
+                    request_kwargs['top_k'] = top_k
+                if seed is not None:
+                    request_kwargs['seed'] = seed
 
-            tests = {}
-            if test_hello_world:
-                tests["hello world"] = lambda server: do_test_hello_world(server, **request_kwargs)
-            if test_weather:
-                tests["weather"] = lambda server: do_test_weather(server, **request_kwargs)
-            if test_calc_result:
-                tests["calc result"] = lambda server: do_test_calc_result(server, None, 512, **request_kwargs)
+                request_kwargs['cache_prompt'] = False
 
-            for test_name, test in tests.items():
-                success_count = 0
-                failure_count = 0
-                failures = []
-                success_times = []
-                failure_times = []
-                logger.info(f"Running {test_name} ({server_name}, {model}): ")
-                for i in range(n):
-                    start_time = time.time()
+                tests = {}
+                if test_hello_world:
+                    tests["hello world"] = lambda server: do_test_hello_world(server, **request_kwargs)
+                if test_weather:
+                    tests["weather"] = lambda server: do_test_weather(server, **request_kwargs)
+                if test_calc_result:
+                    tests["calc result"] = lambda server: do_test_calc_result(server, None, 512, **request_kwargs)
 
-                    def elapsed():
-                        return time.time() - start_time
+                for test_name, test in tests.items():
+                    success_count = 0
+                    failure_count = 0
+                    failures = []
+                    success_times = []
+                    failure_times = []
+                    logger.info(f"Running {test_name} ({server_name}, {model}): ")
+                    for i in range(n):
+                        start_time = time.time()
 
-                    try:
-                        test(server)
-                        success_times.append(elapsed())
-                        success_count += 1
-                        logger.info('success')
-                    except Exception as e:
-                        logger.error(f'failure: {e}')
-                        failure_count += 1
-                        failure_times.append(elapsed())
-                        failures.append(str(e))
-                        # import traceback
-                        # traceback.print_exc()
-                output_file.write(json.dumps({**output_kwargs, **dict(
-                    model=model,
-                    server_name=server_name,
-                    model_id=model_id,
-                    test=test_name,
-                    temp=t,
-                    top_p=top_p,
-                    top_k=top_k,
-                    ctk=ctk,
-                    ctv=ctv,
-                    seed=seed,
-                    success_ratio=float(success_count) / n,
-                    avg_time=mean(success_times + failure_times),
-                    median_time=median(success_times + failure_times),
-                    success_count=success_count,
-                    success_times=success_times,
-                    failure_count=failure_count,
-                    failure_times=failure_times,
-                    failures=list(set(failures)),
-                )}) + '\n')
-                output_file.flush()
+                        def elapsed():
+                            return time.time() - start_time
 
-        for t in [None] if temp is None else [t if t >= 0 else None for t in temp]:
-            if hf is not None:
+                        try:
+                            test(server)
+                            success_times.append(elapsed())
+                            success_count += 1
+                            logger.info('success')
+                        except Exception as e:
+                            logger.error(f'failure: {e}')
+                            failure_count += 1
+                            failure_times.append(elapsed())
+                            failures.append(str(e))
+                            # import traceback
+                            # traceback.print_exc()
+                    result_dict = {**output_kwargs, **dict(
+                        model=model,
+                        server_name=server_name,
+                        model_id=model_id,
+                        test=test_name,
+                        temp=t,
+                        top_p=top_p,
+                        top_k=top_k,
+                        ctk=ctk,
+                        ctv=ctv,
+                        seed=seed,
+                        success_ratio=float(success_count) / n,
+                        avg_time=mean(success_times + failure_times),
+                        median_time=median(success_times + failure_times),
+                        success_count=success_count,
+                        success_times=success_times,
+                        failure_count=failure_count,
+                        failure_times=failure_times,
+                        failures=list(set(failures)),
+                    )}
+                    output_file.write(json.dumps(result_dict) + '\n')
+                    output_file.flush()
 
-                servers: list[Tuple[str, Optional[str]]] = [('llama-server', None)]
-                if llama_baseline is not None:
-                    servers.append(('llama-server (baseline)', llama_baseline))
+                    tsv_writer.writerow({
+                        'model': result_dict['model'],
+                        'server_name': result_dict['server_name'],
+                        'test': result_dict['test'],
+                        'temp': result_dict['temp'],
+                        'success_ratio': result_dict['success_ratio'],
+                        'avg_time': result_dict['avg_time'],
+                        'median_time': result_dict['median_time'],
+                        'success_count': result_dict['success_count'],
+                        'failure_count': result_dict['failure_count'],
+                    })
+                    tsv_file.flush()
 
-                for server_name, server_path in servers:
+            for t in [None] if temp is None else [t if t >= 0 else None for t in temp]:
+                if hf is not None:
+
+                    servers: list[Tuple[str, Optional[str]]] = [('llama-server', None)]
+                    if llama_baseline is not None:
+                        servers.append(('llama-server (baseline)', llama_baseline))
+
+                    for server_name, server_path in servers:
+                        server = ServerProcess()
+                        server.n_ctx = n_ctx
+                        server.n_slots = 1
+                        server.jinja = True
+                        server.ctk = ctk
+                        server.ctv = ctv
+                        server.fa = "on" if fa else "off"
+                        server.n_predict = n_predict
+                        server.model_hf_repo = hf
+                        server.model_hf_file = None
+                        server.chat_template = chat_template
+                        server.chat_template_file = chat_template_file
+                        server.server_path = server_path
+                        if port is not None:
+                            server.server_port = port
+                        # server.debug = True
+
+                        with scoped_server(server):
+                            server.start(timeout_seconds=15 * 60)
+                            for ignore_chat_grammar in [False]:
+                                run(
+                                    server,
+                                    server_name=server_name,
+                                    model_id=hf,
+                                    temp=t,
+                                    output_kwargs=dict(
+                                        chat_template=chat_template,
+                                        chat_template_file=chat_template_file,
+                                    ),
+                                    request_kwargs=dict(
+                                        ignore_chat_grammar=ignore_chat_grammar,
+                                    ),
+                                )
+
+                if ollama is not None:
                     server = ServerProcess()
-                    server.n_ctx = n_ctx
-                    server.n_slots = 1
-                    server.jinja = True
-                    server.ctk = ctk
-                    server.ctv = ctv
-                    server.fa = "on" if fa else "off"
-                    server.n_predict = n_predict
-                    server.model_hf_repo = hf
-                    server.model_hf_file = None
-                    server.chat_template = chat_template
-                    server.chat_template_file = chat_template_file
-                    server.server_path = server_path
-                    if port is not None:
-                        server.server_port = port
-                    # server.debug = True
+                    server.server_port = 11434
+                    server.server_host = "localhost"
+                    subprocess.check_call(["ollama", "pull", ollama])
 
                     with scoped_server(server):
-                        server.start(timeout_seconds=15 * 60)
-                        for ignore_chat_grammar in [False]:
-                            run(
-                                server,
-                                server_name=server_name,
-                                model_id=hf,
-                                temp=t,
-                                output_kwargs=dict(
-                                    chat_template=chat_template,
-                                    chat_template_file=chat_template_file,
-                                ),
-                                request_kwargs=dict(
-                                    ignore_chat_grammar=ignore_chat_grammar,
-                                ),
-                            )
-
-            if ollama is not None:
-                server = ServerProcess()
-                server.server_port = 11434
-                server.server_host = "localhost"
-                subprocess.check_call(["ollama", "pull", ollama])
-
-                with scoped_server(server):
-                    run(
-                        server,
-                        server_name="ollama",
-                        model_id=ollama,
-                        temp=t,
-                        output_kwargs=dict(
-                            chat_template=None,
-                            chat_template_file=None,
-                        ),
-                        request_kwargs=dict(
-                            model=ollama,
-                            max_tokens=n_predict,
-                            num_ctx = n_ctx,
-                        ),
-                    )
+                        run(
+                            server,
+                            server_name="ollama",
+                            model_id=ollama,
+                            temp=t,
+                            output_kwargs=dict(
+                                chat_template=None,
+                                chat_template_file=None,
+                            ),
+                            request_kwargs=dict(
+                                model=ollama,
+                                max_tokens=n_predict,
+                                num_ctx = n_ctx,
+                            ),
+                        )
+    finally:
+        tsv_file.close()
 
 
 if __name__ == "__main__":
