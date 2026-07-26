@@ -19,9 +19,9 @@ services:
                           count: all
                           capabilities:
                               - gpu
-        # port exposed via prompt-logger proxy; uncomment to bypass proxy:
-        # ports:
-        #     - 3002:8080
+        # direct access, bypassing prompt-logger/prompt-router proxies (web UI + API):
+        ports:
+            - 8080:8080
         volumes:
             - /mnt/llm/llama.cpp/models:/models
             - ./data/logs:/logs
@@ -335,29 +335,31 @@ services:
         #     --spec-ngram-mod-n-min 8
         #     --spec-ngram-mod-n-max 24
 
-        command: >
-            --server --host 0.0.0.0 --port 8080 --jinja
-            --n-gpu-layers 99
-            -lv 4 --log-timestamps --log-colors on
-            --checkpoint-min-step 4000 --ctx-checkpoints 32
-            --cache-prompt --cache-ram -1
-            -m /models/GLM-4.7-Flash-UD-Q3_K_XL-MTP-zacaj.gguf --alias "Qwen3.6-35B-A3B"  
-            --n-cpu-moe 0
-            --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
-            --ctx-size 200000 
-            -b 2048 -ub 128
-            --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
-            --flash-attn on 
-            --keep 20000 --context-shift
-            -ctk q5_0 -ctv q5_0 --kv-unified 
-            --spec-draft-type-k turbo4
-            --spec-draft-type-v turbo4
-            --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
-            --spec-type draft-mtp,ngram-mod --spec-draft-n-max 2
-            --spec-draft-ctx-size 8192
-            --spec-ngram-mod-n-match 16
-            --spec-ngram-mod-n-min 8
-            --spec-ngram-mod-n-max 24
+        # GLM MTP
+        # 100k q50 ngram16 spec2 105tg 48% | 550pe 40% 50tg
+        # command: >
+        #     --server --host 0.0.0.0 --port 8080 --jinja
+        #     --n-gpu-layers 99
+        #     -lv 4 --log-timestamps --log-colors on
+        #     --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #     --cache-prompt --cache-ram -1
+        #     -m /models/GLM-4.7-Flash-UD-Q3_K_XL-MTP-zacaj.gguf --alias "Qwen3.6-35B-A3B"  
+        #     --n-cpu-moe 0
+        #     --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #     --ctx-size 100000 
+        #     -b 2048 -ub 128
+        #     --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #     --flash-attn on 
+        #     --keep 20000 --context-shift
+        #     -ctk q5_0 -ctv q5_0 --kv-unified 
+        #     --spec-draft-type-k turbo4
+        #     --spec-draft-type-v turbo4
+        #     --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #     --spec-type draft-mtp,ngram-mod --spec-draft-n-max 1
+        #     --spec-draft-ctx-size 8192
+        #     --spec-ngram-mod-n-match 16
+        #     --spec-ngram-mod-n-min 8
+        #     --spec-ngram-mod-n-max 24
 
         # Qwen3.6-27B-UD-IQ3_XXS-MTP
         # 100k q50/q50 u128 spec3 8k t3/t3 ngram 60% 40-52t/s | 20% 16tg  292pe
@@ -383,9 +385,6 @@ services:
         #      --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
         #      --ctx-size 100000 
         #      -b 2048 -ub 128
-        #      --repeat-penalty 1.1 --repeat-last-n 256
-        #      --dry-multiplier 0.5 --dry-allowed-length 4 --dry-base 1.75 --dry-penalty-last-n 4096
-        #      --xtc-probability 0.5 --xtc-threshold 0.1
         #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
         #      --flash-attn on 
         #      --keep 20000 --context-shift
@@ -395,9 +394,64 @@ services:
         #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
         #      --spec-type draft-mtp,ngram-mod --spec-draft-n-max 2
         #      --spec-draft-ctx-size 8192
-        #      --spec-ngram-mod-n-match 24
+        #      --spec-ngram-mod-n-match 16
         #      --spec-ngram-mod-n-min 8
         #      --spec-ngram-mod-n-max 24
+
+        # Qwen3.5-9B-Q8_0-MTP-unsloth
+        # 200k Q8 spec2 ng16 64tg 60%
+        # 200k Q8 spec3 ng16 65tg 50% | 55-75tg 40-55% | 125: 40-50tg, 40-50%
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      --n-gpu-layers 99
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models/Qwen3.5-9B-Q8_0-MTP-unsloth.gguf --alias "Qwen3.6-35B-A3B"  
+        #      --n-cpu-moe 0
+        #      --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      --ctx-size 200000 
+        #      -b 2048 -ub 128
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on 
+        #      --keep 20000 --context-shift
+        #      -ctk q8_0 -ctv q8_0 --kv-unified 
+        #      --spec-draft-type-k q8_0
+        #      --spec-draft-type-v q8_0
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp,ngram-mod --spec-draft-n-max 4
+        #      --spec-draft-ctx-size 8192
+        #      --spec-ngram-mod-n-match 16
+        #      --spec-ngram-mod-n-min 8
+        #      --spec-ngram-mod-n-max 24
+        #      --spec-draft-p-min 0.75
+
+        # Qwen3.5-4B
+        command: >
+             --server --host 0.0.0.0 --port 8080 --jinja --chat-template-file /models/chat_template.jinja
+             --n-gpu-layers 99
+             -lv 4 --log-timestamps --log-colors on
+             --checkpoint-min-step 4000 --ctx-checkpoints 32
+             --cache-prompt --cache-ram -1
+             -m /models/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf --alias "Qwen3.6-35B-A3B"  
+             --n-cpu-moe 0
+             --temp 0.5 --top-p 0.95 --top-k 20 --min-p 0.01
+             --ctx-size 100000 
+             -b 2048 -ub 128
+             --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+             --flash-attn on 
+             --keep 20000 --context-shift
+             -ctk q6_0 -ctv q6_0 --kv-unified 
+             --mmproj /models/mmproj-Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-BF16.gguf
+            #  --spec-draft-type-k q6_0
+            #  --spec-draft-type-v q6_0
+            #  --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+            #  --spec-type draft-mtp,ngram-mod --spec-draft-n-max 4
+            #  --spec-draft-ctx-size 8192
+            #  --spec-ngram-mod-n-match 16
+            #  --spec-ngram-mod-n-min 8
+            #  --spec-ngram-mod-n-max 24
+            #  --spec-draft-p-min 0.75
 
         # Qwen3.5-9B-MTP-unsloth-TQ3_1S
         # 100K 43t/s
@@ -872,6 +926,22 @@ services:
             - PROMPT_LOG_DIR=/logs/prompts
             - LOG_FILTERED=true
             - LOG_FULL_BODY=true
+        depends_on:
+            - llama-cpp
+        restart: unless-stopped
+
+    prompt-router:
+        image: python:3-slim
+        volumes:
+            - ./data/prompt-logger:/app:ro
+        working_dir: /app
+        command: python proxy.py
+        ports:
+            - 3003:8080
+        environment:
+            - LLAMA_BACKEND_HOST=llama-cpp
+            - LLAMA_BACKEND_PORT=8080
+            - NO_LOG=true
         depends_on:
             - llama-cpp
         restart: unless-stopped
