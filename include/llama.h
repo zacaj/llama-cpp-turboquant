@@ -352,6 +352,11 @@ extern "C" {
         // override key-value pairs of the model meta data
         const struct llama_model_kv_override * kv_overrides;
 
+        // path to a vocab-patch GGUF (KV + token_embd/output tensors only):
+        // overlays a pruned vocabulary onto the base model at load time, in
+        // place of a full duplicate model file. NULL disables (default).
+        const char * vocab_patch_path;
+
         // Keep the booleans together to avoid misalignment during copy-by-value.
         bool vocab_only;      // only load the vocabulary, no weights
         bool check_tensors;   // validate model tensor data

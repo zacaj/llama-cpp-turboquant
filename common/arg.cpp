@@ -2743,6 +2743,14 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_OVERRIDE_TENSOR"));
     add_opt(common_arg(
+        {"--vocab-patch"}, "FNAME",
+        "path to a vocab-patch GGUF (pruned tokenizer KV + token_embd/output tensors only); "
+        "overlays a smaller vocabulary onto the base model at load time",
+        [](common_params & params, const std::string & value) {
+            params.vocab_patch_path = value;
+        }
+    ).set_env("LLAMA_ARG_VOCAB_PATCH"));
+    add_opt(common_arg(
         {"-cmoe", "--cpu-moe"},
         "keep all Mixture of Experts (MoE) weights in the CPU",
         [](common_params & params) {

@@ -547,8 +547,10 @@ llama_model_loader::llama_model_loader(
         bool no_alloc,
         bool load_mtp,
         const llama_model_kv_override * param_overrides_p,
-        const llama_model_tensor_buft_override * param_tensor_buft_overrides_p)
-        : metadata(meta), set_tensor_data(set_tensor_data), set_tensor_data_ud(set_tensor_data_ud) {
+        const llama_model_tensor_buft_override * param_tensor_buft_overrides_p,
+        const char * vocab_patch_path_p)
+        : metadata(meta), set_tensor_data(set_tensor_data), set_tensor_data_ud(set_tensor_data_ud),
+          vocab_patch_path(vocab_patch_path_p ? vocab_patch_path_p : "") {
     int trace = 0;
     if (getenv("LLAMA_TRACE")) {
         trace = atoi(getenv("LLAMA_TRACE"));
@@ -677,6 +679,46 @@ llama_model_loader::llama_model_loader(
             }
 
             LLAMA_LOG_INFO("%s: additional %d GGUFs metadata loaded.\n",  __func__, n_split - 1);
+        }
+
+        // Load and merge a vocab patch, if provided: a small GGUF containing
+        // only pruned tokenizer KV pairs and the two vocab-dimensioned
+        // tensors, overlaid onto the base model. Unlike splits (disjoint
+        // additional tensors), a patch's tensor names are EXPECTED to
+        // already exist in weights_map and intentionally overwrite them.
+        if (!vocab_patch_path.empty()) {
+            struct ggml_context * patch_ctx = NULL;
+            struct gguf_init_params patch_params = {
+                /*.no_alloc = */ true,
+                /*.ctx      = */ &patch_ctx,
+            };
+            gguf_context_ptr patch_metadata { gguf_init_from_file(vocab_patch_path.c_str(), patch_params) };
+            if (!patch_metadata) {
+                throw std::runtime_error(format("%s: failed to load vocab patch from %s", __func__, vocab_patch_path.c_str()));
+            }
+
+            gguf_set_kv(metadata, patch_metadata.get());
+
+            const uint16_t patch_idx = (uint16_t) files.size();
+            files.emplace_back(new llama_file(vocab_patch_path.c_str(), "rb", use_direct_io));
+            contexts.emplace_back(patch_ctx);
+
+            for (ggml_tensor * cur = ggml_get_first_tensor(patch_ctx); cur; cur = ggml_get_next_tensor(patch_ctx, cur)) {
+                std::string tensor_name = std::string(cur->name);
+                auto it = weights_map.find(tensor_name);
+                if (it != weights_map.end()) {
+                    n_elements -= ggml_nelements(it->second.tensor);
+                    n_bytes    -= ggml_nbytes(it->second.tensor);
+                    it->second = llama_tensor_weight(files.back().get(), patch_idx, patch_metadata.get(), cur);
+                } else {
+                    weights_map.emplace(tensor_name, llama_tensor_weight(files.back().get(), patch_idx, patch_metadata.get(), cur));
+                }
+                n_elements += ggml_nelements(cur);
+                n_bytes    += ggml_nbytes(cur);
+                LLAMA_LOG_INFO("%s: vocab patch overrides tensor '%s'\n", __func__, tensor_name.c_str());
+            }
+
+            LLAMA_LOG_INFO("%s: vocab patch loaded from %s\n", __func__, vocab_patch_path.c_str());
         }
     } else if (file != nullptr) {
         struct ggml_context * ctx = NULL;
