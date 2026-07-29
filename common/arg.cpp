@@ -1397,11 +1397,14 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
      * - all examples inherit options from LLAMA_EXAMPLE_COMMON
      * - if LLAMA_EXAMPLE_* is set (other than COMMON), we only show the option in the corresponding example
      * - if both {LLAMA_EXAMPLE_COMMON, LLAMA_EXAMPLE_*,} are set, we will prioritize the LLAMA_EXAMPLE_* matching current example
+     * - LLAMA_EXAMPLE_FIT_PARAMS additionally inherits every LLAMA_EXAMPLE_SERVER option, so a server launch
+     *   command line can be reused as-is (minus the actual serving) to preview its memory breakdown
      */
     auto add_opt = [&](common_arg arg) {
         // download only exposes the handful of args explicitly tagged for it
         const bool inherit_common = ex != LLAMA_EXAMPLE_DOWNLOAD;
-        if ((arg.in_example(ex) || (inherit_common && arg.in_example(LLAMA_EXAMPLE_COMMON))) && !arg.is_exclude(ex)) {
+        const bool fit_params_inherits_server = ex == LLAMA_EXAMPLE_FIT_PARAMS && arg.in_example(LLAMA_EXAMPLE_SERVER);
+        if ((arg.in_example(ex) || (inherit_common && arg.in_example(LLAMA_EXAMPLE_COMMON)) || fit_params_inherits_server) && !arg.is_exclude(ex)) {
             ctx_arg.options.push_back(std::move(arg));
         }
     };

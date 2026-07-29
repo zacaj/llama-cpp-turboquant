@@ -102,6 +102,17 @@ LLAMA_API size_t llama_model_get_moe_tensor_info(
         struct llama_moe_tensor_info * info,
         size_t capacity);
 
+// model weight bytes bucketed by tensor category, for a rough answer to "where do the model bytes go"
+struct llama_model_tensor_breakdown {
+    size_t attn      = 0; // per-layer attention projections (q/k/v/output)
+    size_t ffn_exps  = 0; // per-layer MoE expert feed-forward weights
+    size_t ffn_dense = 0; // per-layer dense feed-forward weights + per-layer norms
+    size_t embedding = 0; // token embedding, output head, top-level norms
+    size_t other     = 0; // anything not matched above
+};
+
+LLAMA_API llama_model_tensor_breakdown llama_get_model_tensor_breakdown(const struct llama_model * model);
+
 LLAMA_API ggml_backend_dev_t llama_model_get_device(const struct llama_model * model, int i);
 
 LLAMA_API llama_memory_breakdown llama_get_memory_breakdown(const struct llama_context * ctx);

@@ -1573,29 +1573,190 @@ void common_memory_breakdown_print(const struct llama_context * ctx) {
     }
 }
 
-void common_fit_print(
-        const char * path_model,
-        llama_model_params * mparams,
-        llama_context_params * cparams) {
+// bytes already accumulated for one device (or host, keyed by nullptr) across every model/context measured
+struct common_fit_device_totals {
+    size_t model   = 0;
+    size_t context = 0;
+    size_t compute = 0;
+};
+
+// a second, model-only no_alloc load just to bucket weight bytes by tensor category; cheap (metadata only,
+// no weight data is copied) relative to the model+context load common_get_device_memory_data_impl already does
+static llama_model_tensor_breakdown common_get_model_tensor_breakdown(const char * path_model, const llama_model_params * mparams) {
+    llama_model_params mparams_copy = *mparams;
+    mparams_copy.no_alloc  = true;
+    mparams_copy.use_mmap  = false;
+    mparams_copy.use_mlock = false;
+
+    llama_model * model = llama_model_load_from_file(path_model, mparams_copy);
+    if (model == nullptr) {
+        throw std::runtime_error("failed to load model");
+    }
+    llama_model_tensor_breakdown ret = llama_get_model_tensor_breakdown(model);
+    llama_model_free(model);
+    return ret;
+}
+
+static void common_fit_print_tensor_breakdown(const llama_model_tensor_breakdown & tb) {
+    constexpr size_t MiB = 1024 * 1024;
+    const size_t total = tb.attn + tb.ffn_exps + tb.ffn_dense + tb.embedding + tb.other;
+    printf("  model tensor breakdown: %zu MiB = %zu attention + %zu MoE experts + %zu dense FFN + %zu embedding/output",
+           total/MiB, tb.attn/MiB, tb.ffn_exps/MiB, tb.ffn_dense/MiB, tb.embedding/MiB);
+    if (tb.other > 0) {
+        printf(" + %zu other", tb.other/MiB);
+    }
+    printf("\n");
+}
+
+static void common_fit_print_context_size(size_t context_bytes, uint32_t n_ctx) {
+    constexpr size_t MiB = 1024 * 1024;
+    if (n_ctx == 0) {
+        return;
+    }
+    printf("  context: %u token slots, %.3f MiB/token combined K+V+aux (%zu MiB total)\n",
+           n_ctx, (double) context_bytes / n_ctx / MiB, context_bytes/MiB);
+}
+
+static size_t common_fit_sum_context_bytes(const std::vector<llama_device_memory_data> & dmd) {
+    size_t total = 0;
+    for (const auto & d : dmd) {
+        total += d.mb.context;
+    }
+    return total;
+}
+
+void common_fit_print(common_params & params) {
+    // snapshot free/total for every backend device before any dry-run load touches memory, so the final
+    // summary can report how much is already used by other processes / the driver, independent of our own
+    // (transient, freed-before-the-next-call) no_alloc allocations below.
+    struct common_fit_baseline {
+        int64_t total;
+        int64_t free;
+    };
+    std::map<ggml_backend_dev_t, common_fit_baseline> baseline;
+    for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        size_t free, total;
+        ggml_backend_dev_memory(dev, &free, &total);
+        baseline[dev] = {(int64_t) total, (int64_t) free};
+    }
+
+    std::vector<ggml_backend_dev_t> dev_order; // first-seen order, for stable summary printing
+    std::map<ggml_backend_dev_t, common_fit_device_totals> combined; // nullptr key = host
+    auto accumulate = [&](const std::vector<ggml_backend_dev_t> & devs, const std::vector<llama_device_memory_data> & dmd, bool measure_model_bytes) {
+        for (size_t i = 0; i < devs.size(); i++) {
+            if (combined.find(devs[i]) == combined.end()) {
+                dev_order.push_back(devs[i]);
+            }
+            auto & c = combined[devs[i]];
+            c.model   += measure_model_bytes ? dmd[i].mb.model : 0;
+            c.context += dmd[i].mb.context;
+            c.compute += dmd[i].mb.compute;
+        }
+        if (combined.find(nullptr) == combined.end()) {
+            dev_order.push_back(nullptr);
+        }
+        auto & host = combined[nullptr];
+        host.model   += measure_model_bytes ? dmd.back().mb.model : 0;
+        host.context += dmd.back().mb.context;
+        host.compute += dmd.back().mb.compute;
+    };
+
+    auto mparams = common_model_params_to_llama(params);
+    auto cparams = common_context_params_to_llama(params);
+
     std::vector<ggml_backend_dev_t> devs;
     uint32_t hp_ngl = 0; // hparams.n_gpu_layers
     uint32_t hp_nct = 0; // hparams.n_ctx_train
     uint32_t hp_nex = 0; // hparams.n_expert
 
-    auto dmd = common_get_device_memory_data_impl(path_model, mparams, cparams, devs, hp_ngl, hp_nct, hp_nex, GGML_LOG_LEVEL_ERROR);
-    GGML_ASSERT(dmd.size() == devs.size() + 1);
+    auto dmd = common_get_device_memory_data_impl(params.model.path.c_str(), &mparams, &cparams, devs, hp_ngl, hp_nct, hp_nex, GGML_LOG_LEVEL_ERROR);
+    printf("# target model: %s\n", params.model.path.c_str());
+    accumulate(devs, dmd, /* measure_model_bytes = */ true);
+    try {
+        common_fit_print_tensor_breakdown(common_get_model_tensor_breakdown(params.model.path.c_str(), &mparams));
+    } catch (const std::exception & e) {
+        LOG_WRN("%s: failed to get tensor breakdown for target model: %s\n", __func__, e.what());
+    }
+    common_fit_print_context_size(common_fit_sum_context_bytes(dmd), cparams.n_ctx);
 
-    for (size_t id = 0; id < devs.size(); id++) {
-        printf("%s ",  ggml_backend_dev_name(devs[id]));
-        printf("%zu ", dmd[id].mb.model/1024/1024);
-        printf("%zu ", dmd[id].mb.context/1024/1024);
-        printf("%zu ", dmd[id].mb.compute/1024/1024);
-        printf("\n");
+    // if speculative decoding is configured, also estimate the memory used by the draft model / MTP context.
+    // mirrors the pre-load estimate server_context::load_model() computes internally to budget --fit.
+    const bool spec_mtp = std::find(params.speculative.types.begin(), params.speculative.types.end(),
+                                     COMMON_SPECULATIVE_TYPE_DRAFT_MTP) != params.speculative.types.end();
+    const bool has_draft = params.speculative.has_dft();
+
+    if (has_draft || spec_mtp) {
+        common_params params_dft = params;
+        bool measure_model_bytes = true;
+
+        if (has_draft) {
+            const auto & params_spec         = params.speculative.draft;
+            params_dft.devices               = params_spec.devices;
+            params_dft.model                 = params_spec.mparams;
+            params_dft.n_gpu_layers          = params_spec.n_gpu_layers;
+            params_dft.cache_type_k          = params_spec.cache_type_k;
+            params_dft.cache_type_v          = params_spec.cache_type_v;
+            params_dft.tensor_buft_overrides = params_spec.tensor_buft_overrides;
+        } else {
+            // MTP draft context lives on the target model, only context+compute are new
+            measure_model_bytes = false;
+        }
+
+        params_dft.n_outputs_max = params.n_parallel;
+
+        auto mparams_dft = common_model_params_to_llama(params_dft);
+        auto cparams_dft = common_context_params_to_llama(params_dft);
+        if (spec_mtp) {
+            cparams_dft.ctx_type = LLAMA_CONTEXT_TYPE_MTP;
+            cparams_dft.type_k   = params.speculative.draft.cache_type_k;
+            cparams_dft.type_v   = params.speculative.draft.cache_type_v;
+        }
+        cparams_dft.n_rs_seq = 0;
+
+        if (params.speculative.draft.n_ctx > 0) {
+            cparams_dft.n_ctx = params.speculative.draft.n_ctx;
+        }
+
+        std::vector<ggml_backend_dev_t> devs_dft;
+        uint32_t hp_ngl_dft = 0;
+        uint32_t hp_nct_dft = 0;
+        uint32_t hp_nex_dft = 0;
+        auto dmd_dft = common_get_device_memory_data_impl(
+                params_dft.model.path.c_str(), &mparams_dft, &cparams_dft,
+                devs_dft, hp_ngl_dft, hp_nct_dft, hp_nex_dft, GGML_LOG_LEVEL_ERROR);
+
+        printf("# %s: %s\n", has_draft ? "draft model" : "MTP context", params_dft.model.path.c_str());
+        accumulate(devs_dft, dmd_dft, measure_model_bytes);
+        if (has_draft) {
+            try {
+                common_fit_print_tensor_breakdown(common_get_model_tensor_breakdown(params_dft.model.path.c_str(), &mparams_dft));
+            } catch (const std::exception & e) {
+                LOG_WRN("%s: failed to get tensor breakdown for draft model: %s\n", __func__, e.what());
+            }
+        }
+        common_fit_print_context_size(common_fit_sum_context_bytes(dmd_dft), cparams_dft.n_ctx);
     }
 
-    printf("Host ");
-    printf("%zu ", dmd.back().mb.model/1024/1024);
-    printf("%zu ", dmd.back().mb.context/1024/1024);
-    printf("%zu ", dmd.back().mb.compute/1024/1024);
-    printf("\n");
+    constexpr size_t MiB = 1024 * 1024;
+    printf("\n# summary: total memory footprint if launched with these settings\n");
+    for (ggml_backend_dev_t dev : dev_order) {
+        const auto & c = combined[dev];
+        const size_t self = c.model + c.context + c.compute;
+
+        if (dev == nullptr) {
+            printf("Host: %zu MiB used (%zu model + %zu context + %zu compute)\n",
+                   self/MiB, c.model/MiB, c.context/MiB, c.compute/MiB);
+            continue;
+        }
+
+        const auto it = baseline.find(dev);
+        const int64_t total          = it != baseline.end() ? it->second.total : 0;
+        const int64_t other_usage    = it != baseline.end() ? total - it->second.free : 0; // already in use before our own loads (other processes, driver reserve)
+        const int64_t free_after     = total - other_usage - (int64_t) self;
+
+        printf("%s: %zu MiB used (%zu model + %zu context + %zu compute), %lld MiB already used by other processes/driver, ~%lld MiB free after load (of %lld MiB total)\n",
+               ggml_backend_dev_name(dev), self/MiB, c.model/MiB, c.context/MiB, c.compute/MiB,
+               (long long) (other_usage/(int64_t)MiB), (long long) (free_after/(int64_t)MiB), (long long) (total/(int64_t)MiB));
+    }
 }

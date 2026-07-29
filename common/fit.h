@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common.h"
 #include "ggml.h"
 #include "llama.h"
 
@@ -74,11 +75,8 @@ common_params_fit_status common_fit_params(
                            uint32_t   n_ctx_min,             // minimum context size to set when trying to reduce memory use
                      ggml_log_level   log_level);            // minimum log level to print during fitting, lower levels go to debug log
 
-// print estimated memory to stdout
-void common_fit_print(
-                         const char * path_model,
-                 llama_model_params * mparams,
-               llama_context_params * cparams);
+// print estimated memory to stdout for the target model plus, if configured, the draft/MTP model or context
+void common_fit_print(struct common_params & params);
 
 void common_memory_breakdown_print(const llama_context * ctx);
 

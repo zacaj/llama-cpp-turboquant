@@ -82,7 +82,7 @@ int llama_fit_params(int argc, char ** argv) {
         LOG_INF("%s: printing estimated memory in MiB to stdout (device, model, context, compute) ...\n", __func__);
         common_log_flush(common_log_main());
 
-        common_fit_print(params.model.path.c_str(), &mparams, &cparams);
+        common_fit_print(params);
     }
 
     return 0;

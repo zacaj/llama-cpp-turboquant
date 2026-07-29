@@ -3098,6 +3098,27 @@ size_t llama_model_get_moe_tensor_info(
     return count;
 }
 
+llama_model_tensor_breakdown llama_get_model_tensor_breakdown(const llama_model * model) {
+    llama_model_tensor_breakdown ret;
+    for (const auto & [name, tensor] : model->tensors_by_name) {
+        const size_t nbytes = ggml_nbytes(tensor);
+        if (name.rfind("blk.", 0) == 0) {
+            if (name.find("_exps") != std::string::npos) {
+                ret.ffn_exps += nbytes;
+            } else if (name.find("attn_") != std::string::npos) {
+                ret.attn += nbytes;
+            } else {
+                ret.ffn_dense += nbytes;
+            }
+        } else if (name.rfind("token_embd", 0) == 0 || name.rfind("output", 0) == 0) {
+            ret.embedding += nbytes;
+        } else {
+            ret.other += nbytes;
+        }
+    }
+    return ret;
+}
+
 int32_t llama_model_n_devices(const struct llama_model * model) {
     return (int32_t)model->devices.size();
 }
