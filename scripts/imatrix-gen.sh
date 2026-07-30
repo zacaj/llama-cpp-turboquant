@@ -10,9 +10,8 @@
 # apply the resulting imatrix to (the tool only reads activations, not weights, per-tensor).
 #
 # <corpus-file> is looked up under CORPUS_DIR (default: /mnt/llm/llama.cpp/models), so point it at
-# e.g. bartowski-calibration_datav5.txt or prompt_corpus.txt directly by filename, or pass an
-# absolute path if it lives elsewhere. data/corpus/wikitext-2-raw/wiki.train.raw also works via
-# an absolute path.
+# e.g. bartowski-calibration_datav5.txt or prompt_corpus.txt directly by filename. Absolute paths
+# are mounted verbatim into the container.
 #
 # chunks defaults to 200 (matches the wikitext-2 baseline runs this repo's KLD tooling uses).
 # Pass -1 to run to exhaustion instead -- fine for small corpora (e.g. bartowski's ~6k-line
@@ -37,41 +36,76 @@ CORPUS_DIR="${CORPUS_DIR:-/mnt/llm/llama.cpp/models}"
 OUTPUT_DIR="${OUTPUT_DIR:-/mnt/llm/llama.cpp/models}"
 IMAGE=llama-cpp-turboquant-llama-cpp:latest
 
-OUT_NAME="${4:-$(basename "$CORPUS" | sed -E 's/\.[^.]+$//').imatrix.gguf}"
+declare -A host_to_container
 
+add_mount() {
+    local host_path="$1"
+    local container_path="$2"
+    host_to_container[$host_path]=$container_path
+}
+
+resolve_path() {
+    local p="$1"
+    case "$p" in
+        "$MODELS_DIR"/*)
+            add_mount "$MODELS_DIR" "/models"
+            echo "/models/${p#"$MODELS_DIR"/}"
+            ;;
+        "$MODELS2_DIR"/*)
+            add_mount "$MODELS2_DIR" "/models2"
+            echo "/models2/${p#"$MODELS2_DIR"/}"
+            ;;
+        "$CORPUS_DIR"/*)
+            add_mount "$CORPUS_DIR" "/corpus"
+            echo "/corpus/${p#"$CORPUS_DIR"/}"
+            ;;
+        "$OUTPUT_DIR"/*)
+            add_mount "$OUTPUT_DIR" "/output"
+            echo "/output/${p#"$OUTPUT_DIR"/}"
+            ;;
+        /*)
+            add_mount "$p" "$p"
+            echo "$p"
+            ;;
+        *)
+            add_mount "$CORPUS_DIR" "/corpus"
+            echo "/corpus/$p"
+            ;;
+    esac
+}
+
+# Resolve model (check both MODELS_DIR and MODELS2_DIR)
 if [ -f "$MODELS_DIR/$MODEL" ]; then
-    MODEL_MOUNT_ARG=(-v "$MODELS_DIR":/models)
-    MODEL_PATH="/models/$MODEL"
+    MODEL_PATH="$(resolve_path "$MODELS_DIR/$MODEL")"
 elif [ -f "$MODELS2_DIR/$MODEL" ]; then
-    MODEL_MOUNT_ARG=(-v "$MODELS2_DIR":/models2)
-    MODEL_PATH="/models2/$MODEL"
+    MODEL_PATH="$(resolve_path "$MODELS2_DIR/$MODEL")"
 else
     echo "ERROR: model '$MODEL' not found under $MODELS_DIR or $MODELS2_DIR" >&2
     exit 1
 fi
 
-if [[ "$CORPUS" = /* ]]; then
-    CORPUS_MOUNT_DIR="$(dirname "$CORPUS")"
-    CORPUS_PATH="/corpus-abs/$(basename "$CORPUS")"
-    CORPUS_MOUNT_ARG=(-v "$CORPUS_MOUNT_DIR":/corpus-abs:ro)
-else
-    CORPUS_MOUNT_ARG=(-v "$CORPUS_DIR":/corpus:ro)
-    CORPUS_PATH="/corpus/$CORPUS"
-fi
+CORPUS_PATH="$(resolve_path "$CORPUS")"
 
 mkdir -p "$OUTPUT_DIR"
+
+OUT_NAME="${4:-$(basename "$CORPUS" | sed -E 's/\.[^.]+$//').imatrix.gguf}"
+OUTPUT_PATH="$(resolve_path "$OUTPUT_DIR/$OUT_NAME")"
+
+# Build docker mounts from tracking map
+declare -a docker_mounts
+for host in "${!host_to_container[@]}"; do
+    docker_mounts+=("-v" "$host:${host_to_container[$host]}")
+done
 
 echo "Generating imatrix: model=$MODEL corpus=$CORPUS chunks=$CHUNKS -> $OUT_NAME" >&2
 
 docker run --rm --gpus all \
-    "${MODEL_MOUNT_ARG[@]}" \
-    "${CORPUS_MOUNT_ARG[@]}" \
-    -v "$OUTPUT_DIR":/output \
+    "${docker_mounts[@]}" \
     --entrypoint /app/llama-imatrix \
     "$IMAGE" \
     -m "$MODEL_PATH" \
     -f "$CORPUS_PATH" \
-    -o "/output/$OUT_NAME" \
+    -o "$OUTPUT_PATH" \
     --chunks "$CHUNKS" \
     -ngl 99 -c 512 -b 512 --flash-attn on
 

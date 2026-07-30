@@ -33,9 +33,8 @@
 # overrides get skipped entirely -- see the --pure guard in llama_tensor_get_type.
 #
 # Filenames with no directory component resolve under MODELS_DIR. Absolute paths
-# must live under MODELS_DIR or DUMP_DIR (both get mounted into the container);
-# anywhere else, move/symlink the file into one of those first. Sharded/split GGUF
-# input is not handled (no --keep-split).
+# are mounted verbatim into the container. Sharded/split GGUF input is not handled
+# (no --keep-split).
 set -euo pipefail
 
 F16_MODEL="${1:?Usage: requant-from-reference.sh <f16-model> <reference-model> [output.gguf] [imatrix-file]}"
@@ -53,16 +52,33 @@ if [ -z "$OUTPUT" ]; then
     OUTPUT="$MODELS_DIR/$(basename "$F16_MODEL" .gguf)-requant-like-$(basename "$REF_MODEL" .gguf).gguf"
 fi
 
+declare -A host_to_container
+
+add_mount() {
+    local host_path="$1"
+    local container_path="$2"
+    host_to_container[$host_path]=$container_path
+}
+
 resolve() {
     local p="$1"
     case "$p" in
-        "$MODELS_DIR"/*) echo "/models/${p#"$MODELS_DIR"/}" ;;
-        "$DUMP_DIR"/*)   echo "/dumpout/${p#"$DUMP_DIR"/}" ;;
-        /*)
-            echo "ERROR: $p is outside MODELS_DIR ($MODELS_DIR) and DUMP_DIR ($DUMP_DIR) -- not visible in the container" >&2
-            exit 1
+        "$MODELS_DIR"/*)
+            add_mount "$MODELS_DIR" "/models"
+            echo "/models/${p#"$MODELS_DIR"/}"
             ;;
-        *) echo "/models/$p" ;;
+        "$DUMP_DIR"/*)
+            add_mount "$DUMP_DIR" "/dumpout"
+            echo "/dumpout/${p#"$DUMP_DIR"/}"
+            ;;
+        /*)
+            add_mount "$p" "$p"
+            echo "$p"
+            ;;
+        *)
+            add_mount "$MODELS_DIR" "/models"
+            echo "/models/$p"
+            ;;
     esac
 }
 
@@ -75,12 +91,17 @@ mkdir -p "$DUMP_DIR"
 TYPES_FILE="$DUMP_DIR/$(basename "$F16_MODEL" .gguf)-tensor-types-from-$(basename "$REF_MODEL" .gguf).txt"
 TYPES_ARG="$(resolve "$TYPES_FILE")"
 
+# Build docker mounts from tracking map
+declare -a docker_mounts
+for host in "${!host_to_container[@]}"; do
+    docker_mounts+=("-v" "$host:${host_to_container[$host]}")
+done
+
 echo "=== Reading tensor types from reference: $REF_MODEL ===" >&2
 docker run --rm \
     --entrypoint python3 \
     -e PYTHONPATH=/app/gguf-py \
-    -v "$MODELS_DIR":/models \
-    -v "$DUMP_DIR":/dumpout \
+    "${docker_mounts[@]}" \
     -v "$REPO_DIR/scripts":/host-scripts:ro \
     "$IMAGE" \
     /host-scripts/gguf_tensor_type_map.py "$REF_ARG" "$F16_ARG" "$TYPES_ARG"
@@ -93,8 +114,7 @@ fi
 
 echo "=== Quantizing $F16_MODEL -> $OUTPUT (base ftype $BASE_FTYPE for any unmatched tensor) ===" >&2
 docker run --rm --gpus all \
-    -v "$MODELS_DIR":/models \
-    -v "$DUMP_DIR":/dumpout \
+    "${docker_mounts[@]}" \
     "$IMAGE" \
     --quantize "${QUANTIZE_ARGS[@]}" "$F16_ARG" "$OUTPUT_ARG" "$BASE_FTYPE"
 

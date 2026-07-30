@@ -8,8 +8,8 @@
 # <model-filename> is only used to validate tensor names against; it is looked up the same way as
 # in imatrix-gen.sh (checked under /models then /models2/MODELS2_DIR).
 #
-# All imatrix files must be readable from /mnt/llm/llama.cpp/models (default IMATRIX_DIR) --
-# pass filenames relative to that dir, or absolute paths.
+# Imatrix files are looked up under IMATRIX_DIR (default: /mnt/llm/llama.cpp/models);
+# absolute paths are mounted verbatim into the container.
 set -euo pipefail
 
 MODEL="${1:?Usage: imatrix-combine.sh <model-filename> <output-name> <imatrix-file> [imatrix-file ...]}"
@@ -29,12 +29,49 @@ IMATRIX_DIR="${IMATRIX_DIR:-/mnt/llm/llama.cpp/models}"
 OUTPUT_DIR="${OUTPUT_DIR:-/mnt/llm/llama.cpp/models}"
 IMAGE=llama-cpp-turboquant-llama-cpp:latest
 
+declare -A host_to_container
+
+add_mount() {
+    local host_path="$1"
+    local container_path="$2"
+    host_to_container[$host_path]=$container_path
+}
+
+resolve_path() {
+    local p="$1"
+    case "$p" in
+        "$MODELS_DIR"/*)
+            add_mount "$MODELS_DIR" "/models"
+            echo "/models/${p#"$MODELS_DIR"/}"
+            ;;
+        "$MODELS2_DIR"/*)
+            add_mount "$MODELS2_DIR" "/models2"
+            echo "/models2/${p#"$MODELS2_DIR"/}"
+            ;;
+        "$IMATRIX_DIR"/*)
+            add_mount "$IMATRIX_DIR" "/imatrix"
+            echo "/imatrix/${p#"$IMATRIX_DIR"/}"
+            ;;
+        "$OUTPUT_DIR"/*)
+            add_mount "$OUTPUT_DIR" "/output"
+            echo "/output/${p#"$OUTPUT_DIR"/}"
+            ;;
+        /*)
+            add_mount "$p" "$p"
+            echo "$p"
+            ;;
+        *)
+            add_mount "$IMATRIX_DIR" "/imatrix"
+            echo "/imatrix/$p"
+            ;;
+    esac
+}
+
+# Resolve model (check both MODELS_DIR and MODELS2_DIR)
 if [ -f "$MODELS_DIR/$MODEL" ]; then
-    MODEL_MOUNT_ARG=(-v "$MODELS_DIR":/models)
-    MODEL_PATH="/models/$MODEL"
+    MODEL_PATH="$(resolve_path "$MODELS_DIR/$MODEL")"
 elif [ -f "$MODELS2_DIR/$MODEL" ]; then
-    MODEL_MOUNT_ARG=(-v "$MODELS2_DIR":/models2)
-    MODEL_PATH="/models2/$MODEL"
+    MODEL_PATH="$(resolve_path "$MODELS2_DIR/$MODEL")"
 else
     echo "ERROR: model '$MODEL' not found under $MODELS_DIR or $MODELS2_DIR" >&2
     exit 1
@@ -42,30 +79,44 @@ fi
 
 mkdir -p "$OUTPUT_DIR"
 
+# Ensure OUTPUT_DIR is in mount map
+add_mount "$OUTPUT_DIR" "/output"
+OUTPUT_PATH="/output/$OUT_NAME"
+
 IN_FILE_CSV=""
 for f in "${IN_FILES[@]}"; do
+    # Resolve input path, validating it exists
     if [[ "$f" = /* ]]; then
-        echo "ERROR: absolute paths for imatrix inputs not supported yet -- copy into $IMATRIX_DIR" >&2
-        exit 1
+        if [ ! -f "$f" ]; then
+            echo "ERROR: imatrix file not found: $f" >&2
+            exit 1
+        fi
+        IN_PATH="$(resolve_path "$f")"
+    else
+        if [ ! -f "$IMATRIX_DIR/$f" ]; then
+            echo "ERROR: imatrix file not found: $IMATRIX_DIR/$f" >&2
+            exit 1
+        fi
+        IN_PATH="$(resolve_path "$IMATRIX_DIR/$f")"
     fi
-    if [ ! -f "$IMATRIX_DIR/$f" ]; then
-        echo "ERROR: imatrix file not found: $IMATRIX_DIR/$f" >&2
-        exit 1
-    fi
-    IN_FILE_CSV="${IN_FILE_CSV:+$IN_FILE_CSV,}/imatrix/$f"
+    IN_FILE_CSV="${IN_FILE_CSV:+$IN_FILE_CSV,}$IN_PATH"
+done
+
+# Build docker mounts from tracking map
+declare -a docker_mounts
+for host in "${!host_to_container[@]}"; do
+    docker_mounts+=("-v" "$host:${host_to_container[$host]}")
 done
 
 echo "Combining ${#IN_FILES[@]} imatrix file(s) -> $OUT_NAME: ${IN_FILES[*]}" >&2
 
 docker run --rm --gpus all \
-    "${MODEL_MOUNT_ARG[@]}" \
-    -v "$IMATRIX_DIR":/imatrix \
-    -v "$OUTPUT_DIR":/output \
+    "${docker_mounts[@]}" \
     --entrypoint /app/llama-imatrix \
     "$IMAGE" \
     -m "$MODEL_PATH" \
     --in-file "$IN_FILE_CSV" \
-    -o "/output/$OUT_NAME"
+    -o "$OUTPUT_PATH"
 
 echo "Combined imatrix written to $OUTPUT_DIR/$OUT_NAME" >&2
 echo "$OUTPUT_DIR/$OUT_NAME"

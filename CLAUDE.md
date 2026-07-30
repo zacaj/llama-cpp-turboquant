@@ -104,6 +104,17 @@ reusable the next time the same kind of task comes up, documented with a header 
 existing scripts (purpose, usage, path-resolution rules), and go through Docker per the rule
 above rather than assuming host tooling.
 
+**Script design patterns:** New and refactored scripts should follow these conventions where
+applicable: (1) use a `resolve_path()` helper that maps common directories (MODELS_DIR, DUMP_DIR)
+to container paths and mounts alternate absolute paths verbatim; (2) deduplicate docker mounts
+using an associative array keyed by host path to avoid double-mounting; (3) support optional
+arguments for output location, with auto-generated filenames when output is a directory; (4)
+create parent directories as needed rather than requiring pre-existing structure. See
+`gguf-layer-quants.sh` for a recent example.
+
+**Documentation:** When adding a new script, add a one-line entry to the list below with its
+purpose and usage. Update this list if you significantly change a script's interface.
+
 - `imatrix-gen.sh`, `imatrix-combine.sh` — generate/merge importance matrices from a text corpus
   for a model; combine is token-count-weighted, not a naive average.
 - `perplexity-run.sh` — run `llama-perplexity` against a corpus, print final PPL.
@@ -126,6 +137,9 @@ above rather than assuming host tooling.
   comparison between quantizations/configs (pairwise or full matrix), against a reference.
 - `compare-llama-bench.py` / `bench-models.sh` / `bench-smem-m5.sh` — perf comparison/benchmarking
   harnesses.
+- `bench-filter.py` / `bench-filter.sh` — filter bench-results.tsv by regex on any column,
+  sorted by median tg/s for finding the best config for a specific model/setting. Use as:
+  `bench-filter.sh -- '-m=Qwen3\.6-27B' '--spec-draft-type-v=turbo3' --top 10`.
 
 ## Architecture notes specific to this fork
 
