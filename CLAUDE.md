@@ -127,6 +127,15 @@ purpose and usage. Update this list if you significantly change a script's inter
 - `prune_moe_experts.py` + `lowest_experts_from_profile.py` — remove specific experts from MoE
   GGUFs directly on quantized tensors (no dequant round-trip); the latter turns a per-layer expert
   activation profile into the CSV the former expects. All layers must drop the same expert count.
+- `moe-expert-profile.sh` + `merge_moe_profiles.py` — generate that per-layer expert activation
+  profile from one or more perplexity-style text corpora (no live traffic needed), via the
+  `llama-moe-weights` example's `-o` flag; merges multiple corpus runs into one summary CSV. Also
+  writes a sibling `.weighted.csv` (summed router weight-mass per expert, not just selection
+  count) — prefer this as `lowest_experts_from_profile.py`'s input over the plain count CSV.
+  Measured on Qwen3.6-35B-A3B at 40% expert removal: weight-mass-based pruning beat count-based
+  on PPL across every corpus and `expert_used_count` tested (-2% to -15%, gap widens at higher k)
+  since raw-count pruning can discard experts that are rarely selected but dominant (high-weight,
+  rank-1) whenever they are.
 - `dedup-prompt-logs.py` / `extract_prompt_corpus.py` — turn `prompt-logger`'s JSON dumps into a
   deduplicated plaintext calibration corpus (whole-file dedup, then leaf-string dedup, since
   real traffic replays near-identical system prompts/tool defs on almost every request).
