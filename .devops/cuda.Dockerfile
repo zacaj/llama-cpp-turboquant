@@ -98,8 +98,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt autoremove -y \
     && rm -rf /tmp/* /var/tmp/*
 
-COPY --from=build /app/lib/ /app
-
 ### Full
 FROM base AS full
 
@@ -124,6 +122,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --break-system-packages --upgrade setuptools \
     && pip install --break-system-packages -r requirements.txt
 
+# COPY --from=build happens last in each downstream stage (not in `base`) so that
+# recompiling from a source change doesn't bust the apt/pip cache above.
+COPY --from=build /app/lib/ /app
 COPY --from=build /app/full /app
 
 
@@ -132,6 +133,7 @@ ENTRYPOINT ["/app/tools.sh"]
 ### Light, CLI only
 FROM base AS light
 
+COPY --from=build /app/lib/ /app
 COPY --from=build /app/full/llama /app/full/llama-cli /app/full/llama-completion /app
 
 WORKDIR /app
@@ -143,6 +145,7 @@ FROM base AS server
 
 ENV LLAMA_ARG_HOST=0.0.0.0
 
+COPY --from=build /app/lib/ /app
 COPY --from=build /app/full/llama /app/full/llama-server /app
 
 WORKDIR /app
