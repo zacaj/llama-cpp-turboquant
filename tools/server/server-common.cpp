@@ -687,7 +687,33 @@ size_t validate_utf8(const std::string& text) {
     return len;
 }
 
-server_tokens process_mtmd_prompt(mtmd_context * mctx, const std::string & prompt, const std::vector<raw_buffer> & files, bool is_placeholder) {
+// mtmd_input_text carries the prompt as a bare `const char *`, so any embedded NUL would
+// silently truncate everything after it. Tool output can legitimately contain NULs (e.g. a
+// UTF-16LE log file pasted into a tool result), and the non-mtmd path (tokenize_mixed) keeps
+// them, so strip them here rather than losing the rest of the conversation.
+static std::string strip_nul_bytes(const std::string & text) {
+    size_t n_nul = 0;
+    for (const char c : text) {
+        n_nul += (c == '\0');
+    }
+    if (n_nul == 0) {
+        return text;
+    }
+
+    SRV_WRN("prompt contains %zu NUL byte(s); stripping them (they would truncate the prompt)\n", n_nul);
+
+    std::string out;
+    out.reserve(text.size() - n_nul);
+    for (const char c : text) {
+        if (c != '\0') {
+            out += c;
+        }
+    }
+    return out;
+}
+
+server_tokens process_mtmd_prompt(mtmd_context * mctx, const std::string & prompt_raw, const std::vector<raw_buffer> & files, bool is_placeholder) {
+    const std::string prompt = strip_nul_bytes(prompt_raw);
     // these will be freed upon going out of scope
     mtmd::bitmaps bitmaps;
     std::vector<mtmd_helper::video_ptr> videos;
