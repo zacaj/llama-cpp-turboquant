@@ -28,39 +28,43 @@ add_mount() {
     host_to_container[$host_path]=$container_path
 }
 
+# Sets RESOLVED as a side effect (not just echoes it) -- must be called as a plain
+# statement, not via command substitution, or the add_mount calls run in a subshell
+# and their host_to_container mutations never reach the parent shell.
 resolve_path() {
     local p="$1"
     case "$p" in
         "$MODELS_DIR"/*)
             add_mount "$MODELS_DIR" "/models"
-            echo "/models/${p#"$MODELS_DIR"/}"
+            RESOLVED="/models/${p#"$MODELS_DIR"/}"
             ;;
         "$DUMP_DIR"/*)
             add_mount "$DUMP_DIR" "/dumpout"
-            echo "/dumpout/${p#"$DUMP_DIR"/}"
+            RESOLVED="/dumpout/${p#"$DUMP_DIR"/}"
             ;;
         /*)
-            # Absolute path: mount verbatim
+            # Absolute path: mount verbatim (always an existing input file here,
+            # never a not-yet-created output, so no dirname indirection needed)
             add_mount "$p" "$p"
-            echo "$p"
+            RESOLVED="$p"
             ;;
         *)
             # Relative path: resolve under MODELS_DIR
             add_mount "$MODELS_DIR" "/models"
-            echo "/models/$p"
+            RESOLVED="/models/$p"
             ;;
     esac
 }
 
-MODEL_ARG="$(resolve_path "$MODEL")"
+resolve_path "$MODEL"; MODEL_ARG="$RESOLVED"
 
 # Handle optional output argument
 if [[ -n "$OUTPUT" ]]; then
     # Check if output is a directory
     if [[ -d "$OUTPUT" ]]; then
         # Generate output path: directory/input_basename.quants.tsv
-        local input_base="${MODEL##*/}"
-        local input_noext="${input_base%.*}"
+        input_base="${MODEL##*/}"
+        input_noext="${input_base%.*}"
         OUTPUT="${OUTPUT%/}/${input_noext}.quants.tsv"
     fi
     # Ensure parent directory exists

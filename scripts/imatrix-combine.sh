@@ -37,41 +37,49 @@ add_mount() {
     host_to_container[$host_path]=$container_path
 }
 
+# Sets RESOLVED as a side effect (not just echoes it) -- must be called as a plain
+# statement, not via command substitution, or the add_mount calls run in a subshell
+# and their host_to_container mutations never reach the parent shell.
 resolve_path() {
     local p="$1"
     case "$p" in
         "$MODELS_DIR"/*)
             add_mount "$MODELS_DIR" "/models"
-            echo "/models/${p#"$MODELS_DIR"/}"
+            RESOLVED="/models/${p#"$MODELS_DIR"/}"
             ;;
         "$MODELS2_DIR"/*)
             add_mount "$MODELS2_DIR" "/models2"
-            echo "/models2/${p#"$MODELS2_DIR"/}"
+            RESOLVED="/models2/${p#"$MODELS2_DIR"/}"
             ;;
         "$IMATRIX_DIR"/*)
             add_mount "$IMATRIX_DIR" "/imatrix"
-            echo "/imatrix/${p#"$IMATRIX_DIR"/}"
+            RESOLVED="/imatrix/${p#"$IMATRIX_DIR"/}"
             ;;
         "$OUTPUT_DIR"/*)
             add_mount "$OUTPUT_DIR" "/output"
-            echo "/output/${p#"$OUTPUT_DIR"/}"
+            RESOLVED="/output/${p#"$OUTPUT_DIR"/}"
             ;;
         /*)
-            add_mount "$p" "$p"
-            echo "$p"
+            # Mount the parent dir, not the exact file: the file may not exist yet
+            # (e.g. an output path), and docker creates missing bind-mount sources
+            # as directories, which would break writing to it.
+            local dir; dir="$(dirname "$p")"
+            mkdir -p "$dir"
+            add_mount "$dir" "$dir"
+            RESOLVED="$dir/$(basename "$p")"
             ;;
         *)
             add_mount "$IMATRIX_DIR" "/imatrix"
-            echo "/imatrix/$p"
+            RESOLVED="/imatrix/$p"
             ;;
     esac
 }
 
 # Resolve model (check both MODELS_DIR and MODELS2_DIR)
 if [ -f "$MODELS_DIR/$MODEL" ]; then
-    MODEL_PATH="$(resolve_path "$MODELS_DIR/$MODEL")"
+    resolve_path "$MODELS_DIR/$MODEL"; MODEL_PATH="$RESOLVED"
 elif [ -f "$MODELS2_DIR/$MODEL" ]; then
-    MODEL_PATH="$(resolve_path "$MODELS2_DIR/$MODEL")"
+    resolve_path "$MODELS2_DIR/$MODEL"; MODEL_PATH="$RESOLVED"
 else
     echo "ERROR: model '$MODEL' not found under $MODELS_DIR or $MODELS2_DIR" >&2
     exit 1
@@ -91,13 +99,13 @@ for f in "${IN_FILES[@]}"; do
             echo "ERROR: imatrix file not found: $f" >&2
             exit 1
         fi
-        IN_PATH="$(resolve_path "$f")"
+        resolve_path "$f"; IN_PATH="$RESOLVED"
     else
         if [ ! -f "$IMATRIX_DIR/$f" ]; then
             echo "ERROR: imatrix file not found: $IMATRIX_DIR/$f" >&2
             exit 1
         fi
-        IN_PATH="$(resolve_path "$IMATRIX_DIR/$f")"
+        resolve_path "$IMATRIX_DIR/$f"; IN_PATH="$RESOLVED"
     fi
     IN_FILE_CSV="${IN_FILE_CSV:+$IN_FILE_CSV,}$IN_PATH"
 done

@@ -38,58 +38,75 @@ IMAGE=llama-cpp-turboquant-llama-cpp:latest
 
 declare -A host_to_container
 
+# First-come-first-served: if this host path was already mounted (e.g. MODELS_DIR
+# and OUTPUT_DIR happen to be the same directory), keep the existing container
+# mountpoint rather than silently overwriting it -- overwriting would leave any
+# already-computed RESOLVED path referencing a mountpoint docker was never told
+# about. Sets MOUNT_CONTAINER_PATH to whichever container path is now authoritative
+# for this host path, so callers use the real mount, not the one they assumed.
 add_mount() {
     local host_path="$1"
-    local container_path="$2"
-    host_to_container[$host_path]=$container_path
+    local desired_container_path="$2"
+    if [ -z "${host_to_container[$host_path]+x}" ]; then
+        host_to_container[$host_path]=$desired_container_path
+    fi
+    MOUNT_CONTAINER_PATH="${host_to_container[$host_path]}"
 }
 
+# Sets RESOLVED as a side effect (not just echoes it) -- must be called as a plain
+# statement, not via command substitution, or the add_mount calls run in a subshell
+# and their host_to_container mutations never reach the parent shell.
 resolve_path() {
     local p="$1"
     case "$p" in
         "$MODELS_DIR"/*)
             add_mount "$MODELS_DIR" "/models"
-            echo "/models/${p#"$MODELS_DIR"/}"
+            RESOLVED="$MOUNT_CONTAINER_PATH/${p#"$MODELS_DIR"/}"
             ;;
         "$MODELS2_DIR"/*)
             add_mount "$MODELS2_DIR" "/models2"
-            echo "/models2/${p#"$MODELS2_DIR"/}"
+            RESOLVED="$MOUNT_CONTAINER_PATH/${p#"$MODELS2_DIR"/}"
             ;;
         "$CORPUS_DIR"/*)
             add_mount "$CORPUS_DIR" "/corpus"
-            echo "/corpus/${p#"$CORPUS_DIR"/}"
+            RESOLVED="$MOUNT_CONTAINER_PATH/${p#"$CORPUS_DIR"/}"
             ;;
         "$OUTPUT_DIR"/*)
             add_mount "$OUTPUT_DIR" "/output"
-            echo "/output/${p#"$OUTPUT_DIR"/}"
+            RESOLVED="$MOUNT_CONTAINER_PATH/${p#"$OUTPUT_DIR"/}"
             ;;
         /*)
-            add_mount "$p" "$p"
-            echo "$p"
+            # Mount the parent dir, not the exact file: the file may not exist yet
+            # (e.g. an output path), and docker creates missing bind-mount sources
+            # as directories, which would break writing to it.
+            local dir; dir="$(dirname "$p")"
+            mkdir -p "$dir"
+            add_mount "$dir" "$dir"
+            RESOLVED="$MOUNT_CONTAINER_PATH/$(basename "$p")"
             ;;
         *)
             add_mount "$CORPUS_DIR" "/corpus"
-            echo "/corpus/$p"
+            RESOLVED="$MOUNT_CONTAINER_PATH/$p"
             ;;
     esac
 }
 
 # Resolve model (check both MODELS_DIR and MODELS2_DIR)
 if [ -f "$MODELS_DIR/$MODEL" ]; then
-    MODEL_PATH="$(resolve_path "$MODELS_DIR/$MODEL")"
+    resolve_path "$MODELS_DIR/$MODEL"; MODEL_PATH="$RESOLVED"
 elif [ -f "$MODELS2_DIR/$MODEL" ]; then
-    MODEL_PATH="$(resolve_path "$MODELS2_DIR/$MODEL")"
+    resolve_path "$MODELS2_DIR/$MODEL"; MODEL_PATH="$RESOLVED"
 else
     echo "ERROR: model '$MODEL' not found under $MODELS_DIR or $MODELS2_DIR" >&2
     exit 1
 fi
 
-CORPUS_PATH="$(resolve_path "$CORPUS")"
+resolve_path "$CORPUS"; CORPUS_PATH="$RESOLVED"
 
 mkdir -p "$OUTPUT_DIR"
 
 OUT_NAME="${4:-$(basename "$CORPUS" | sed -E 's/\.[^.]+$//').imatrix.gguf}"
-OUTPUT_PATH="$(resolve_path "$OUTPUT_DIR/$OUT_NAME")"
+resolve_path "$OUTPUT_DIR/$OUT_NAME"; OUTPUT_PATH="$RESOLVED"
 
 # Build docker mounts from tracking map
 declare -a docker_mounts
@@ -107,7 +124,7 @@ docker run --rm --gpus all \
     -f "$CORPUS_PATH" \
     -o "$OUTPUT_PATH" \
     --chunks "$CHUNKS" \
-    -ngl 99 -c 512 -b 512 --flash-attn on
+    -c 512 -b 512 --flash-attn on
 
 echo "Imatrix written to $OUTPUT_DIR/$OUT_NAME" >&2
 echo "$OUTPUT_DIR/$OUT_NAME"

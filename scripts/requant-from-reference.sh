@@ -60,38 +60,53 @@ add_mount() {
     host_to_container[$host_path]=$container_path
 }
 
+# Sets RESOLVED as a side effect (not just echoes it) -- must be called as a plain
+# statement, not via command substitution, or the add_mount calls run in a subshell
+# and their host_to_container mutations never reach the parent shell.
 resolve() {
     local p="$1"
     case "$p" in
         "$MODELS_DIR"/*)
             add_mount "$MODELS_DIR" "/models"
-            echo "/models/${p#"$MODELS_DIR"/}"
+            RESOLVED="/models/${p#"$MODELS_DIR"/}"
             ;;
         "$DUMP_DIR"/*)
             add_mount "$DUMP_DIR" "/dumpout"
-            echo "/dumpout/${p#"$DUMP_DIR"/}"
+            RESOLVED="/dumpout/${p#"$DUMP_DIR"/}"
             ;;
         /*)
-            add_mount "$p" "$p"
-            echo "$p"
+            # Mount the parent dir, not the exact file: the file may not exist yet
+            # (e.g. an output path), and docker creates missing bind-mount sources
+            # as directories, which would break writing to it.
+            local dir; dir="$(dirname "$p")"
+            mkdir -p "$dir"
+            add_mount "$dir" "$dir"
+            RESOLVED="$dir/$(basename "$p")"
             ;;
         *)
             add_mount "$MODELS_DIR" "/models"
-            echo "/models/$p"
+            RESOLVED="/models/$p"
             ;;
     esac
 }
 
-F16_ARG="$(resolve "$F16_MODEL")"
-REF_ARG="$(resolve "$REF_MODEL")"
-OUTPUT_ARG="$(resolve "$OUTPUT")"
+resolve "$F16_MODEL"; F16_ARG="$RESOLVED"
+resolve "$REF_MODEL"; REF_ARG="$RESOLVED"
+resolve "$OUTPUT"; OUTPUT_ARG="$RESOLVED"
 
 mkdir -p "$DUMP_DIR"
 
 TYPES_FILE="$DUMP_DIR/$(basename "$F16_MODEL" .gguf)-tensor-types-from-$(basename "$REF_MODEL" .gguf).txt"
-TYPES_ARG="$(resolve "$TYPES_FILE")"
+resolve "$TYPES_FILE"; TYPES_ARG="$RESOLVED"
 
-# Build docker mounts from tracking map
+QUANTIZE_ARGS=(--tensor-type-file "$TYPES_ARG")
+if [ -n "$IMATRIX" ]; then
+    resolve "$IMATRIX"; IMATRIX_ARG="$RESOLVED"
+    QUANTIZE_ARGS+=(--imatrix "$IMATRIX_ARG")
+fi
+
+# Build docker mounts from tracking map -- after all resolve() calls, so every
+# mount either docker run below might need is present.
 declare -a docker_mounts
 for host in "${!host_to_container[@]}"; do
     docker_mounts+=("-v" "$host:${host_to_container[$host]}")
@@ -105,12 +120,6 @@ docker run --rm \
     -v "$REPO_DIR/scripts":/host-scripts:ro \
     "$IMAGE" \
     /host-scripts/gguf_tensor_type_map.py "$REF_ARG" "$F16_ARG" "$TYPES_ARG"
-
-QUANTIZE_ARGS=(--tensor-type-file "$TYPES_ARG")
-if [ -n "$IMATRIX" ]; then
-    IMATRIX_ARG="$(resolve "$IMATRIX")"
-    QUANTIZE_ARGS+=(--imatrix "$IMATRIX_ARG")
-fi
 
 echo "=== Quantizing $F16_MODEL -> $OUTPUT (base ftype $BASE_FTYPE for any unmatched tensor) ===" >&2
 docker run --rm --gpus all \

@@ -951,6 +951,10 @@ static void init_quantize_state_counters(quantize_state_impl & qs, std::vector<t
             qs.has_tied_embeddings = false;
         }
     }
+    // Use n_layer_all (not n_layer(), which excludes nextn/MTP blocks) so the
+    // "blk.N." layer-index bounds check in layer_info() below doesn't reject
+    // MoE-style FFN tensors belonging to an MTP block (e.g. Qwen3.5/3.6's
+    // nextn layer, which is itself a MoE FFN and is named blk.<n_layer>.*).
     qs.n_ffn_down = qs.n_ffn_gate = qs.n_ffn_up = (int)qs.model.hparams.n_layer_all;
 }
 

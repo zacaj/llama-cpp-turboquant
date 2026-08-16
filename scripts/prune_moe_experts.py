@@ -12,6 +12,12 @@ Usage:
   python scripts/prune_moe_experts.py input.gguf output.gguf --csv pruning.csv
   python scripts/prune_moe_experts.py input.gguf output.gguf --experts "3:167,204  5-10:254,255,256"
   python scripts/prune_moe_experts.py input.gguf output.gguf --csv p.csv --experts "*:0"
+  python scripts/prune_moe_experts.py input.gguf output.gguf --csv p.csv \
+      --note pruning.profile=summary.weighted.csv --note pruning.source=input.gguf
+
+--note KEY=VALUE embeds arbitrary string metadata in the output GGUF (repeatable) -- e.g. record
+which profile CSV and source model a pruned GGUF came from, so that's recoverable from the file
+itself (via gguf_dump.py) even if it gets renamed or moved away from a filename that encoded it.
 
 CSV format (first column = layer spec, remaining columns = expert indices to remove):
   layer,e0,e1,...
@@ -195,7 +201,19 @@ def main() -> None:
     parser.add_argument("--csv",     type=Path, help="CSV file with pruning spec")
     parser.add_argument("--experts", type=str,  help='CLI spec e.g. "3:167,204  5-10:254,255"')
     parser.add_argument("--force",   action="store_true", help="Overwrite output without prompting")
+    parser.add_argument("--note", action="append", default=[], metavar="KEY=VALUE",
+                         help="extra string metadata to embed in the output GGUF (e.g. pruning "
+                              "provenance -- which profile/source model this was pruned from), "
+                              "repeatable. Overrides an identically-named key already present in "
+                              "the input, so re-pruning an already-annotated GGUF doesn't fork it.")
     args = parser.parse_args()
+
+    notes: dict[str, str] = {}
+    for n in args.note:
+        if '=' not in n:
+            parser.error(f"Invalid --note {n!r}: expected KEY=VALUE")
+        k, v = n.split('=', 1)
+        notes[k] = v
 
     if not args.csv and not args.experts:
         parser.error("Provide at least one of --csv or --experts")
@@ -263,8 +281,10 @@ def main() -> None:
     if alignment_field is not None:
         writer.data_alignment = alignment_field.contents()
 
-    # Copy KV metadata, updating expert_count
-    suppress = {gguf.Keys.General.ARCHITECTURE}
+    # Copy KV metadata, updating expert_count. --note keys are suppressed here and written
+    # separately below so they always win over an identically-named key already in the input
+    # (relevant when re-pruning an already-annotated GGUF).
+    suppress = {gguf.Keys.General.ARCHITECTURE} | set(notes)
     for field in reader.fields.values():
         if field.name in suppress or field.name.startswith('GGUF.'):
             continue
@@ -275,6 +295,9 @@ def main() -> None:
             print(f"  {expert_count_key}: {n_expert_total} → {n_keep}")
             val = n_keep
         writer.add_key_value(field.name, val, val_type, sub_type=sub_type)
+
+    for key, val in notes.items():
+        writer.add_key_value(key, val, gguf.GGUFValueType.STRING)
 
     # Pass 1: register tensor info (shape/size only, no data copy)
     for tensor in reader.tensors:

@@ -120,6 +120,13 @@ purpose and usage. Update this list if you significantly change a script's inter
 - `perplexity-run.sh` — run `llama-perplexity` against a corpus, print final PPL.
 - `corpus-holdout-slice.sh` — cut an untouched tail slice out of a corpus already consumed (by
   `--chunks N`) for imatrix generation, for a no-overlap PPL eval set.
+- `corpus-token-sample.sh` - cut a byte prefix from a corpus sized to land near a target token
+  count, measured via a real tokenizer rather than a fixed bytes-per-token guess.
+- `perplexity-sweep.sh` - run `llama-perplexity` across the cartesian product of one or more
+  models, one or more `expert_used_count` (k) overrides, and one or more corpora, keeping the full
+  per-chunk log per combination and writing a summary table (TSV + markdown).
+  `perplexity-quant-sweep.sh` is a thin wrapper over it for the common single-corpus, no-k-sweep
+  case (`<corpus-file> <model...>` positional interface).
 - `quantize-iq4xs-uniform.sh` — requantize to a uniform IQ4_XS (forces attn_qkv/ffn_down/attn_v to
   iq4_xs instead of llama.cpp's default q5_K bumps) for a smaller file at a measured quality cost.
 - `gguf-layer-quants.sh` / `gguf_layer_quants.py` — dump a GGUF's per-tensor type/shape/size as
@@ -139,6 +146,17 @@ purpose and usage. Update this list if you significantly change a script's inter
 - `dedup-prompt-logs.py` / `extract_prompt_corpus.py` — turn `prompt-logger`'s JSON dumps into a
   deduplicated plaintext calibration corpus (whole-file dedup, then leaf-string dedup, since
   real traffic replays near-identical system prompts/tool defs on almost every request).
+  `extract_prompt_corpus.py` also drops ANSI-escape-laden terminal captures, JSON-Lines-style log
+  dumps, system-role message content, and bare high-entropy tokens by default
+  (`--keep-ansi`/`--keep-log-dumps`/`--keep-system`/`--keep-entropy` to opt back in) -- these were
+  found via per-chunk perplexity decomposition (`docs/moe-expert-count-analysis.md`) to dominate
+  small eval samples without being genuinely representative text. The entropy filter only drops
+  strings that are *nothing but* a session id / ISO timestamp / UUID / hash; the walker collects
+  every leaf string of the log JSON, so those fields arrive standalone and pass every other filter
+  (they were 3.1% of non-blank lines, and the earlier three filters *raised* their density from 196
+  to 248 id32/MB by shrinking the id-free denominator). Embedded tokens are deliberately left
+  alone -- masking them would swap unpredictable tokens for a repeated, trivially predictable
+  placeholder.
 - `prune_vocab.py` / `build_vocab_patch.py` — BPE vocab pruning and patching tools.
 - `extract_mtp_gguf.py` / `merge_mtp_gguf.py` — split out or merge in a model's MTP/draft head as
   its own GGUF.

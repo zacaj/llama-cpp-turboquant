@@ -29,31 +29,39 @@ add_mount() {
     host_to_container[$host_path]=$container_path
 }
 
+# Sets RESOLVED as a side effect (not just echoes it) -- must be called as a plain
+# statement, not via command substitution, or the add_mount calls run in a subshell
+# and their host_to_container mutations never reach the parent shell.
 resolve() {
     local p="$1"
     case "$p" in
         "$MODELS_DIR"/*)
             add_mount "$MODELS_DIR" "/models"
-            echo "/models/${p#"$MODELS_DIR"/}"
+            RESOLVED="/models/${p#"$MODELS_DIR"/}"
             ;;
         "$ARCHIVE_DIR"/*)
             add_mount "$ARCHIVE_DIR" "/archive"
-            echo "/archive/${p#"$ARCHIVE_DIR"/}"
+            RESOLVED="/archive/${p#"$ARCHIVE_DIR"/}"
             ;;
         /*)
-            add_mount "$p" "$p"
-            echo "$p"
+            # Mount the parent dir, not the exact file: the file may not exist yet
+            # (e.g. an output path), and docker creates missing bind-mount sources
+            # as directories, which would break writing to it.
+            local dir; dir="$(dirname "$p")"
+            mkdir -p "$dir"
+            add_mount "$dir" "$dir"
+            RESOLVED="$dir/$(basename "$p")"
             ;;
         *)
             add_mount "$MODELS_DIR" "/models"
-            echo "/models/$p"
+            RESOLVED="/models/$p"
             ;;
     esac
 }
 
-TARGET_ARG="$(resolve "$TARGET")"
-SOURCE_ARG="$(resolve "$SOURCE")"
-OUTPUT_ARG="$(resolve "$OUTPUT")"
+resolve "$TARGET"; TARGET_ARG="$RESOLVED"
+resolve "$SOURCE"; SOURCE_ARG="$RESOLVED"
+resolve "$OUTPUT"; OUTPUT_ARG="$RESOLVED"
 
 # Build docker mounts from tracking map
 declare -a docker_mounts

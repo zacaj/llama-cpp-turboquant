@@ -629,6 +629,34 @@ ladder, were measured against the pre-filter corpus** (preserved as `ppl_sample.
 filtered corpus and will not reproduce these exact figures. Future perplexity work on this repo
 should use the filtered file unless deliberately reproducing something in this document.
 
+### Follow-up: the entropy leak the first fix missed
+
+Re-running the same per-chunk decomposition on a later 4-chunk `sample20000` sweep found the
+identical failure mode still present, and traced it to a gap in the fix above. The three filters
+are all *whole-string* categories; bare session ids and ISO-8601 timestamps arrive from
+`walk_strings` as standalone leaf strings (a 32-char id and a microsecond timestamp are both
+exactly 32 chars, above the default `--min-len 20`), contain no ANSI, are not JSON lines, and are
+not system-role. They passed all three. Measured on `prompt_corpus.txt`:
+
+- 10,714 lines -- 3.1% of all non-blank lines -- were *nothing but* a bare id or timestamp.
+- Filtering made the density **worse**, 196 -> 248 id32/MB, because it removed a lot of long
+  id-free text (system prompts are huge and contain none) while leaving every short id intact.
+- 93% of 32-char ids and 99.7% of microsecond timestamps were bare; conversely 100% of UUIDs were
+  embedded, nearly all inside `/tmp/claude-<n>/.../<uuid>/...` paths.
+
+Fixed by a fourth default filter (`--keep-entropy` to opt back in) that drops a string when it is
+itself one high-entropy token, or is a multi-line block that is >=50% such tokens. Embedded tokens
+are left alone on purpose: masking them would replace unpredictable tokens with a repeated,
+trivially predictable placeholder and skew perplexity the other way. Replayed over the existing
+`prompt_corpus.txt` this drops 11.6% of leaf strings but only 1.6% of characters, taking id32 from
+248/MB to 18/MB and microsecond timestamps from 5,761 to 15.
+
+One caveat on the artifacts: `prompt_corpus.pre-filter.txt` is not a strict before-image of
+`prompt_corpus.txt`. Comparing unique bare-id sets, the filter removed zero and the filtered file
+contains 507 ids the pre-filter file does not, so the source log set grew between the two runs and
+the "23.6M -> 21.5M chars (~9%)" figure above conflates the filter with corpus growth. The
+document's own numbers are unaffected -- they were all measured against the pre-filter file.
+
 ## Artifacts
 
 - `examples/moe-weights/` - the measurement tool (not upstreamed)
