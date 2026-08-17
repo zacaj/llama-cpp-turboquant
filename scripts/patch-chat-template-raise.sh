@@ -1,5 +1,5 @@
 #!/bin/bash
-# Wrapper for patch_chat_template_raise.py: neutralizes the Qwen3.5/3.6-lineage
+# Wrapper for patch_chat_template_raise.py: neutralizes the Qwen3.5/3.6/3.8-lineage
 # raise_exception() asserts in a GGUF's embedded chat template, true in place
 # (no copy, no tensor data touched), running the python side inside the
 # turboquant docker image so no local python/gguf-py install is required.

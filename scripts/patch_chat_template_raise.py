@@ -16,6 +16,14 @@ Ornith-1.0-35B) contains two hard asserts:
             {{- raise_exception('System message must be at the beginning.') }}
         {%- endif %}
 
+Qwen3.8 restructured the second assert (precomputes num_sys, the length of
+the leading contiguous system/developer run, and raises for any
+system/developer message at loop.index0 >= num_sys) but kept the same bug:
+
+    {%- if message.role == "system" or message.role == "developer" %}
+        {{- raise_exception('System message must be at the beginning.') }}
+    {%- elif message.role == "user" %}
+
 Runtimes that probe the template with synthetic messages, or that inject
 their own system/reminder messages mid-conversation (Claude Code does this),
 trip these and the whole request dies with a 400 before generating a token.
@@ -23,18 +31,27 @@ See:
   https://github.com/ggml-org/llama.cpp/issues/20733
   https://huggingface.co/deepreinforce-ai/Ornith-1.0-35B/discussions/10
 
-This targets only those two textually-distinctive asserts. It is NOT a
+This targets only those textually-distinctive asserts. It is NOT a
 general Jinja rewriter: templates from other lineages (Gemma, Mistral, GLM,
 Llama, ...) don't contain this pattern and are left untouched -- the script
 says so plainly instead of guessing.
 
 How the in-place trick works: rather than deleting the offending lines
 (which would shrink the chat_template string and shift every byte after it
-in the file -- metadata, tensor index, and all tensor data), each guard
-condition ("not loop.first", "ns.multi_step_tool") is rewritten to a
-same-length, always-false expression ("false" padded with trailing spaces).
-Because the replacement is byte-for-byte identical in length, the string's
-length prefix never changes, so nothing else in the GGUF needs to move.
+in the file -- metadata, tensor index, and all tensor data), every
+replacement is made byte-length-identical to what it replaces, padded with
+extra whitespace inside Jinja's `{%-`/`{{-` trim-controlled tags (inert --
+Jinja strips it, so it never reaches rendered output). For the two
+Qwen3.5/3.6-style guards, the condition itself ("not loop.first",
+"ns.multi_step_tool") is rewritten to a same-length, always-false expression
+("false" padded with trailing spaces) -- falsifying the guard is sufficient
+there because the branch has nowhere else to fall through to. The Qwen3.8
+variant can't be fixed that way: falsifying its guard would just fall
+through the elif chain to a *different* raise ("Unexpected message role.")
+further down, so instead the whole branch body is rewritten to render the
+message the same way the adjacent "user" branch does. In every case the
+replacement is byte-for-byte identical in length, so the string's length
+prefix never changes and nothing else in the GGUF needs to move.
 GGUFReader opened in 'r+' mode memory-maps the file, and the chat_template
 field's byte array is a direct view into that mapping -- writing into it
 patches the bytes on disk immediately, in place. No copy of the file is
@@ -87,6 +104,26 @@ BLOCK_PATCHES: list[tuple[str, re.Pattern]] = [
     ),
 ]
 
+# Qwen3.8 restructured the same bug: instead of a "not loop.first" guard, it
+# precomputes num_sys (length of the leading contiguous system/developer run)
+# and raises for any system/developer message at loop.index0 >= num_sys.
+# Unlike the two patches above, just falsifying the guard isn't enough here --
+# the branch would fall through the elif chain to a *different* raise
+# ("Unexpected message role.") a few lines down. So this one rewrites the
+# branch body to render the message the same way the adjacent "user" branch
+# does, padding with whitespace (inert under Jinja's `{%-`/`{{-` trim control)
+# so the substitution stays byte-length-identical to the original block.
+SYSTEM_DEVELOPER_REWRITE_PATTERN = re.compile(
+    r"\{%-\s*if\s+message\.role\s*==\s*[\"']system[\"']\s*or\s+message\.role\s*==\s*[\"']developer[\"']\s*%\}\s*"
+    r"\{\{-\s*raise_exception\(\s*['\"]System message must be at the beginning\.['\"]\s*\)\s*\}\}\s*"
+    r"\{%-\s*elif\s+message\.role\s*==\s*[\"']user[\"']\s*%\}",
+    re.DOTALL,
+)
+SYSTEM_DEVELOPER_REWRITE_LABEL = "system-message-order assert (Qwen3.8 num_sys variant)"
+SYSTEM_DEVELOPER_REWRITE_PREFIX = '{%- if message.role == "system" or message.role == "developer" %}'
+SYSTEM_DEVELOPER_REWRITE_EXPR = "{{- '<|im_start|>' + message.role + '\\n' + content + '<|im_end|>' + '\\n' }}"
+SYSTEM_DEVELOPER_REWRITE_SUFFIX = '{%- elif message.role == "user" %}'
+
 
 def falsify(text: str) -> str:
     """Same-length replacement for a Jinja boolean expression that always evaluates false."""
@@ -94,6 +131,31 @@ def falsify(text: str) -> str:
     if n >= 5:
         return "false" + " " * (n - 5)
     return "0" * n  # degenerate fallback for an implausibly short condition, still falsy
+
+
+def rewrite_system_developer_block(m: re.Match) -> str:
+    """Same-length replacement that renders mid-conversation system/developer
+    messages like the adjacent user branch, instead of raising."""
+    fixed_len = (
+        len(SYSTEM_DEVELOPER_REWRITE_PREFIX)
+        + len(SYSTEM_DEVELOPER_REWRITE_EXPR)
+        + len(SYSTEM_DEVELOPER_REWRITE_SUFFIX)
+    )
+    remaining = len(m.group(0)) - fixed_len
+    if remaining < 2:
+        raise ValueError(
+            f"BUG: matched block ({len(m.group(0))} bytes) too short to fit rewrite "
+            f"({fixed_len} bytes) plus tag separators. Refusing to write -- would corrupt the file."
+        )
+    gap1 = remaining // 2
+    gap2 = remaining - gap1
+    return (
+        SYSTEM_DEVELOPER_REWRITE_PREFIX
+        + " " * gap1
+        + SYSTEM_DEVELOPER_REWRITE_EXPR
+        + " " * gap2
+        + SYSTEM_DEVELOPER_REWRITE_SUFFIX
+    )
 
 
 def neutralize(template: str) -> tuple[str, list[str]]:
@@ -105,6 +167,12 @@ def neutralize(template: str) -> tuple[str, list[str]]:
             cond = m.group(1)
             return m.group(0).replace(cond, falsify(cond), 1)
         out = pattern.sub(repl, out)
+
+    def rewrite_repl(m: re.Match) -> str:
+        applied.append(SYSTEM_DEVELOPER_REWRITE_LABEL)
+        return rewrite_system_developer_block(m)
+    out = SYSTEM_DEVELOPER_REWRITE_PATTERN.sub(rewrite_repl, out)
+
     return out, applied
 
 
@@ -134,7 +202,7 @@ def main() -> None:
 
     if not applied:
         logger.info("- No known-bad pattern found in this template. Not touching the file.")
-        logger.info("  (This only targets the Qwen3.5/3.6-lineage raise_exception asserts;")
+        logger.info("  (This only targets the Qwen3.5/3.6/3.8-lineage raise_exception asserts;")
         logger.info("   other template families are expected to hit this message.)")
         sys.exit(0)
 
