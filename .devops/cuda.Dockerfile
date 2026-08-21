@@ -47,7 +47,7 @@ COPY . .
 
 COPY --from=web /app/tools/ui/dist tools/ui/dist
 
-RUN --mount=type=cache,target=/app/build \
+RUN --mount=type=bind,source=.buildcache,target=/app/build,rw \
     if [ "${CUDA_DOCKER_ARCH}" != "default" ]; then \
     export CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${CUDA_DOCKER_ARCH}"; \
     fi && \
@@ -58,13 +58,11 @@ RUN --mount=type=cache,target=/app/build \
     -DLLAMA_BUILD_TESTS=OFF ${CMAKE_ARGS} -DLLAMA_BUILD_RPC=ON -DGGML_RPC=ON \
     -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined \
     -DLLAMA_BUILD_COMMIT=${GIT_COMMIT} -DLLAMA_BUILD_NUMBER=${GIT_COUNT} . && \
-    cmake --build build --config Release -j$(nproc)
-
-RUN --mount=type=cache,target=/app/build \
+    cmake --build build --config Release -j$(nproc) && \
     mkdir -p /app/lib && \
     find build -name "*.so*" -exec cp -P {} /app/lib \;
 
-RUN --mount=type=cache,target=/app/build \
+RUN --mount=type=bind,source=.buildcache,target=/app/build,rw \
     mkdir -p /app/full \
     && cp build/bin/* /app/full \
     && find /app/full -name "*.so*" -delete \
