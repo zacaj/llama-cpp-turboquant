@@ -2741,6 +2741,109 @@ private:
         return true;
     }
 
+    // media chunk metadata (content-hash id, token/position layout) has no counterpart in the
+    // llama_state_seq file format, which only stores KV data + a flat token array
+    // (LLAMA_TOKEN_NULL at media positions). persist it in a sidecar file so that a restore in a
+    // fresh process can rebuild server_tokens::map_idx_to_media -- required for
+    // get_common_prefix() to recognize a resent image/audio and skip re-encoding, and to keep
+    // find_chunk()/validate() working on the restored slot. no pixel/audio data is stored: the
+    // KV cache at those positions is already fully computed, this is bookkeeping only.
+    static bool media_stubs_save_sidecar(const std::vector<std::pair<size_t, mtmd_input_chunk_stub_info>> & stubs, const std::string & filepath) {
+        FILE * f = fopen(filepath.c_str(), "wb");
+        if (f == nullptr) {
+            return false;
+        }
+
+        bool ok = true;
+
+        const uint32_t magic   = 0x444D4B50; // "PKMD"
+        const uint32_t version = 1;
+        const uint32_t count   = (uint32_t) stubs.size();
+
+        ok = ok && fwrite(&magic,   sizeof(magic),   1, f) == 1;
+        ok = ok && fwrite(&version, sizeof(version), 1, f) == 1;
+        ok = ok && fwrite(&count,   sizeof(count),   1, f) == 1;
+
+        for (const auto & [idx, info] : stubs) {
+            const uint64_t idx64  = idx;
+            const uint8_t  type   = (uint8_t) info.type;
+            const uint32_t id_len = (uint32_t) info.id.size();
+
+            ok = ok && fwrite(&idx64,  sizeof(idx64),  1, f) == 1;
+            ok = ok && fwrite(&type,   sizeof(type),   1, f) == 1;
+            ok = ok && fwrite(&id_len, sizeof(id_len), 1, f) == 1;
+            ok = ok && (id_len == 0 || fwrite(info.id.data(), 1, id_len, f) == id_len);
+            ok = ok && fwrite(&info.n_tokens,          sizeof(info.n_tokens),          1, f) == 1;
+            ok = ok && fwrite(&info.nx,                sizeof(info.nx),                1, f) == 1;
+            ok = ok && fwrite(&info.ny,                sizeof(info.ny),                1, f) == 1;
+            ok = ok && fwrite(&info.pos_type,          sizeof(info.pos_type),          1, f) == 1;
+            ok = ok && fwrite(&info.image_idx,         sizeof(info.image_idx),         1, f) == 1;
+            ok = ok && fwrite(&info.n_temporal_merge,  sizeof(info.n_temporal_merge),  1, f) == 1;
+        }
+
+        fclose(f);
+        return ok;
+    }
+
+    static bool media_stubs_load_sidecar(std::vector<std::pair<size_t, mtmd_input_chunk_stub_info>> & stubs, const std::string & filepath) {
+        FILE * f = fopen(filepath.c_str(), "rb");
+        if (f == nullptr) {
+            return false;
+        }
+
+        uint32_t magic = 0, version = 0, count = 0;
+
+        bool ok = fread(&magic,   sizeof(magic),   1, f) == 1 &&
+                  fread(&version, sizeof(version), 1, f) == 1 &&
+                  fread(&count,   sizeof(count),   1, f) == 1 &&
+                  magic == 0x444D4B50 && version == 1 && count <= 1000000;
+
+        std::vector<std::pair<size_t, mtmd_input_chunk_stub_info>> loaded;
+        loaded.reserve(count);
+
+        for (uint32_t i = 0; ok && i < count; ++i) {
+            uint64_t idx64  = 0;
+            uint8_t  type   = 0;
+            uint32_t id_len = 0;
+
+            ok = ok && fread(&idx64,  sizeof(idx64),  1, f) == 1;
+            ok = ok && fread(&type,   sizeof(type),   1, f) == 1;
+            ok = ok && fread(&id_len, sizeof(id_len), 1, f) == 1;
+            ok = ok && id_len <= (1u << 20); // sanity: refuse absurd id sizes
+            ok = ok && (type == MTMD_INPUT_CHUNK_TYPE_IMAGE || type == MTMD_INPUT_CHUNK_TYPE_AUDIO);
+
+            std::string id;
+            if (ok && id_len > 0) {
+                id.resize(id_len);
+                ok = ok && fread(&id[0], 1, id_len, f) == id_len;
+            }
+
+            mtmd_input_chunk_stub_info info;
+            ok = ok && fread(&info.n_tokens,         sizeof(info.n_tokens),         1, f) == 1;
+            ok = ok && fread(&info.nx,               sizeof(info.nx),               1, f) == 1;
+            ok = ok && fread(&info.ny,               sizeof(info.ny),               1, f) == 1;
+            ok = ok && fread(&info.pos_type,         sizeof(info.pos_type),         1, f) == 1;
+            ok = ok && fread(&info.image_idx,        sizeof(info.image_idx),        1, f) == 1;
+            ok = ok && fread(&info.n_temporal_merge, sizeof(info.n_temporal_merge), 1, f) == 1;
+
+            if (ok) {
+                info.type = (enum mtmd_input_chunk_type) type;
+                info.id   = std::move(id);
+                loaded.emplace_back((size_t) idx64, info);
+            }
+        }
+
+        fclose(f);
+
+        if (!ok) {
+            return false;
+        }
+
+        stubs = std::move(loaded);
+
+        return true;
+    }
+
     // n_tokens_cur: the number of tokens added to the batch for the current slot
     void create_checkpoint(server_slot & slot, const int64_t n_tokens_cur, llama_pos pos_min, llama_pos pos_max) {
         // Slot restore can synthesize a checkpoint without an active inference task.
@@ -2973,23 +3076,19 @@ private:
                         send_error(task, "Invalid slot ID", ERROR_TYPE_INVALID_REQUEST);
                         break;
                     }
-                    if (!check_slot_no_media(*slot, task.id)) {
-                        break;
-                    }
                     if (slot->is_processing()) {
                         // if requested slot is unavailable, we defer this task for processing later
                         SRV_DBG("requested slot is unavailable, defer task, id_task = %d\n", task.id);
                         queue_tasks.defer(std::move(task));
                         break;
                     }
-
+                    const size_t token_count = slot->prompt.tokens.size();
                     const int64_t t_start = ggml_time_us();
 
                     std::string filename = task.slot_action.filename;
                     std::string filepath = task.slot_action.filepath;
 
-                    const llama_tokens tokens = slot->prompt.tokens.get_text_tokens();
-                    const size_t token_count = tokens.size();
+                    const llama_tokens & tokens = slot->prompt.tokens.get_tokens_for_save();
                     const size_t nwrite = llama_state_seq_save_file(ctx_tgt, filepath.c_str(), slot->id, tokens.data(), token_count);
 
                     const int64_t t_end = ggml_time_us();
@@ -3002,6 +3101,17 @@ private:
                             SLT_INF(*slot, "saved %zu context checkpoints to sidecar\n", slot->prompt.checkpoints.size());
                         } else {
                             SLT_WRN(*slot, "failed to write checkpoint sidecar %s\n", (filepath + ".ckpt").c_str());
+                        }
+                    }
+
+                    // persist media chunk metadata (see media_stubs_save_sidecar comment) so that
+                    // restore can rebuild the chunk map without the original image/audio bytes
+                    if (slot->prompt.tokens.has_media()) {
+                        const auto stubs = slot->prompt.tokens.collect_media_stubs();
+                        if (media_stubs_save_sidecar(stubs, filepath + ".media")) {
+                            SLT_INF(*slot, "saved %zu media chunk stubs to sidecar\n", stubs.size());
+                        } else {
+                            SLT_WRN(*slot, "failed to write media sidecar %s\n", (filepath + ".media").c_str());
                         }
                     }
 
@@ -3045,8 +3155,27 @@ private:
                         break;
                     }
                     tokens.resize(token_count);
+
+                    const bool has_media_tokens = std::find(tokens.begin(), tokens.end(), LLAMA_TOKEN_NULL) != tokens.end();
+                    if (has_media_tokens && !mctx) {
+                        slot->prompt.clear();
+                        send_error(task, "Unable to restore slot: save file contains multimodal data, but this server was not started with a multimodal projector (--mmproj)", ERROR_TYPE_INVALID_REQUEST);
+                        break;
+                    }
+
                     slot->prompt.clear();
                     slot->prompt.tokens.insert(tokens);
+
+                    if (has_media_tokens) {
+                        std::vector<std::pair<size_t, mtmd_input_chunk_stub_info>> stubs;
+                        if (!media_stubs_load_sidecar(stubs, filepath + ".media") ||
+                            !slot->prompt.tokens.restore_media_stubs(stubs)) {
+                            slot->prompt.tokens.clear();
+                            send_error(task, "Unable to restore slot: save file contains multimodal data but its .media sidecar is missing, invalid, or doesn't match this save file", ERROR_TYPE_INVALID_REQUEST);
+                            break;
+                        }
+                        SLT_INF(*slot, "restored %zu media chunk stubs from sidecar\n", stubs.size());
+                    }
 
                     // reload the context checkpoints written at save time; without them the
                     // next request's rollback finds no usable cache data and forces a full

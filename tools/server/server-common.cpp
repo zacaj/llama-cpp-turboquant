@@ -408,6 +408,55 @@ const llama_tokens & server_tokens::get_tokens() const {
     return tokens;
 }
 
+std::vector<std::pair<size_t, mtmd_input_chunk_stub_info>> server_tokens::collect_media_stubs() const {
+    std::vector<std::pair<size_t, mtmd_input_chunk_stub_info>> res;
+    res.reserve(map_idx_to_media.size());
+    for (const auto & it : map_idx_to_media) {
+        res.emplace_back(it.first, mtmd_input_chunk_get_stub_info(it.second.get()));
+    }
+    return res;
+}
+
+bool server_tokens::restore_media_stubs(const std::vector<std::pair<size_t, mtmd_input_chunk_stub_info>> & stubs) {
+    GGML_ASSERT(has_mtmd);
+    GGML_ASSERT(map_idx_to_media.empty());
+
+    std::map<size_t, mtmd::input_chunk_ptr> built;
+    std::vector<bool> covered(tokens.size(), false);
+
+    for (const auto & [idx, info] : stubs) {
+        if (idx >= tokens.size() || tokens[idx] != LLAMA_TOKEN_NULL) {
+            return false; // sidecar doesn't match this token stream
+        }
+
+        mtmd::input_chunk_ptr chunk(mtmd_input_chunk_init_from_stub_info(info));
+        const size_t n_tok = mtmd_input_chunk_get_n_tokens(chunk.get());
+
+        if (n_tok == 0 || idx + n_tok > tokens.size()) {
+            return false;
+        }
+        for (size_t i = idx; i < idx + n_tok; ++i) {
+            if (tokens[i] != LLAMA_TOKEN_NULL || covered[i]) {
+                return false; // overlapping or mismatched stub
+            }
+            covered[i] = true;
+        }
+
+        built[idx] = std::move(chunk);
+    }
+
+    // every LLAMA_TOKEN_NULL placeholder must be covered by exactly one stub, or find_chunk()/
+    // pos math would silently misbehave later on an orphaned placeholder
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        if (tokens[i] == LLAMA_TOKEN_NULL && !covered[i]) {
+            return false;
+        }
+    }
+
+    map_idx_to_media = std::move(built);
+    return true;
+}
+
 llama_tokens server_tokens::get_text_tokens() const {
     llama_tokens res;
     res.reserve(tokens.size());

@@ -2297,6 +2297,49 @@ mtmd_input_chunk * mtmd_input_chunk_load(const char * buf, size_t len) {
     }
 }
 
+mtmd_input_chunk_stub_info mtmd_input_chunk_get_stub_info(const mtmd_input_chunk * chunk) {
+    mtmd_input_chunk_stub_info info;
+    info.type = chunk->type;
+    if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE) {
+        const auto & img = *chunk->tokens_image;
+        info.id                = img.id;
+        info.nx                = img.nx;
+        info.ny                = img.ny;
+        info.pos_type          = (uint32_t) img.pos;
+        info.image_idx         = img.image_idx;
+        info.n_temporal_merge  = img.n_temporal_merge;
+    } else if (chunk->type == MTMD_INPUT_CHUNK_TYPE_AUDIO) {
+        const auto & aud = *chunk->tokens_audio;
+        info.id       = aud.id;
+        info.n_tokens = aud.n_tokens;
+    } else {
+        GGML_ABORT("mtmd_input_chunk_get_stub_info: chunk is not media");
+    }
+    return info;
+}
+
+mtmd_input_chunk * mtmd_input_chunk_init_from_stub_info(const mtmd_input_chunk_stub_info & info) {
+    mtmd_input_chunk * chunk = new mtmd_input_chunk{ info.type, {}, nullptr, nullptr };
+    if (info.type == MTMD_INPUT_CHUNK_TYPE_IMAGE) {
+        chunk->tokens_image = mtmd_image_tokens_ptr(new mtmd_image_tokens());
+        chunk->tokens_image->id               = info.id;
+        chunk->tokens_image->nx               = info.nx;
+        chunk->tokens_image->ny               = info.ny;
+        chunk->tokens_image->pos              = (mtmd_pos_type) info.pos_type;
+        chunk->tokens_image->image_idx        = info.image_idx;
+        chunk->tokens_image->n_temporal_merge = info.n_temporal_merge;
+        // batch_f32 stays empty -- this is a stub, there is no pixel data to encode
+    } else if (info.type == MTMD_INPUT_CHUNK_TYPE_AUDIO) {
+        chunk->tokens_audio = mtmd_audio_tokens_ptr(new mtmd_audio_tokens());
+        chunk->tokens_audio->id       = info.id;
+        chunk->tokens_audio->n_tokens = info.n_tokens;
+    } else {
+        delete chunk;
+        GGML_ABORT("mtmd_input_chunk_init_from_stub_info: type is not media");
+    }
+    return chunk;
+}
+
 // mtmd_image_tokens
 
 size_t mtmd_image_tokens_get_n_tokens(const mtmd_image_tokens * image_tokens) {

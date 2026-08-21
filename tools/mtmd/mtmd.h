@@ -408,6 +408,35 @@ MTMD_API std::map<ggml_backend_dev_t, size_t> mtmd_get_memory_usage(
     struct mtmd_context_params ctx_params);
 #endif
 
+// Stub media chunks: carry only the identity/position metadata of an image or audio chunk
+// (content hash id, token/position layout), without the actual pixel/audio buffers.
+// Used to persist a multimodal slot's chunk map across server process restarts (save/restore):
+// the KV cache tensors at a media chunk's positions are already fully computed at save time and
+// don't need to be regenerated, but the server-side bookkeeping (server_tokens::map_idx_to_media)
+// needs *some* chunk object at those indices so that a later mtmd_input_chunk_get_id() /
+// get_n_tokens() / get_n_pos() call (as done by server_tokens::get_common_prefix, to recognize
+// that a follow-up request resends the same image) still works.
+// A stub must NEVER be passed to mtmd_batch_encode / mtmd_batch_add_chunk / mtmd_helper_eval_*
+// or any other function that reads the actual chunk contents -- there is nothing there.
+// Note: this is an unstable API, used internally by the server's slot save/restore; it WILL be
+// removed or changed without deprecation.
+#ifdef __cplusplus
+struct mtmd_input_chunk_stub_info {
+    enum mtmd_input_chunk_type type = MTMD_INPUT_CHUNK_TYPE_IMAGE;
+    std::string id;
+    uint32_t n_tokens         = 0; // audio only
+    uint32_t nx                = 0; // image only
+    uint32_t ny                = 0; // image only
+    uint32_t pos_type          = 0; // image only, opaque -- round-trips through the stub API only
+    uint32_t image_idx         = 0; // image only
+    uint32_t n_temporal_merge  = 1; // image only
+};
+
+// chunk must be of type MTMD_INPUT_CHUNK_TYPE_IMAGE or MTMD_INPUT_CHUNK_TYPE_AUDIO
+MTMD_API mtmd_input_chunk_stub_info mtmd_input_chunk_get_stub_info(const mtmd_input_chunk * chunk);
+MTMD_API mtmd_input_chunk *         mtmd_input_chunk_init_from_stub_info(const mtmd_input_chunk_stub_info & info);
+#endif
+
 //
 // C++ wrappers
 //

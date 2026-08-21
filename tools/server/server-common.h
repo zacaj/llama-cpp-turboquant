@@ -205,8 +205,25 @@ public:
     // for compatibility with context shift and prompt truncation
     void insert(const llama_tokens & inp_tokens);
 
-    // for compatibility with speculative decoding, ctx shift, slot save/load
+    // for compatibility with speculative decoding, ctx shift
+    // asserts !has_media(): this returns the raw token ids, which is only meaningful for
+    // pure-text sequences (a media chunk position holds LLAMA_TOKEN_NULL, not a real token)
     const llama_tokens & get_tokens() const;
+
+    // raw token ids including LLAMA_TOKEN_NULL placeholders at media positions, treated as
+    // opaque bytes -- used only for slot state save, never for anything that decodes them
+    const llama_tokens & get_tokens_for_save() const { return tokens; }
+
+    // stub metadata (id, position/token layout, no pixel/audio data) for every media chunk,
+    // keyed by start index in tokens -- used to persist the chunk map across slot save/restore
+    std::vector<std::pair<size_t, mtmd_input_chunk_stub_info>> collect_media_stubs() const;
+
+    // repopulate the media chunk map from previously-collected stub info, after inserting the
+    // matching raw tokens (with LLAMA_TOKEN_NULL placeholders) via insert(). Used by slot restore.
+    // returns false (leaving the media map untouched) if a stub's index doesn't line up with a
+    // LLAMA_TOKEN_NULL placeholder in the current tokens -- i.e. the sidecar doesn't match this
+    // save file (mismatched pairing, truncated copy, corruption).
+    bool restore_media_stubs(const std::vector<std::pair<size_t, mtmd_input_chunk_stub_info>> & stubs);
 
     llama_tokens get_text_tokens() const;
 
