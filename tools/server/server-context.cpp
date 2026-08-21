@@ -799,7 +799,13 @@ struct server_slot {
         t_print_last = t_now;
         n_decoded_last = n_decoded;
 
-        SLT_INF(*this, "n_decoded = %6d, tg = %6.2f t/s, tg_3s = %6.2f t/s\n", n_decoded, n_gen_second, n_gen_second_win);
+        if (n_draft_total > 0) {
+            const float draft_ratio = (float) n_draft_accepted / n_draft_total;
+            SLT_INF(*this, "n_decoded = %6d, tg = %6.2f t/s, tg_3s = %6.2f t/s, draft accept = %0.3f (%d/%d)\n",
+                    n_decoded, n_gen_second, n_gen_second_win, draft_ratio, n_draft_accepted, n_draft_total);
+        } else {
+            SLT_INF(*this, "n_decoded = %6d, tg = %6.2f t/s, tg_3s = %6.2f t/s\n", n_decoded, n_gen_second, n_gen_second_win);
+        }
     }
 
     void print_timings_pp() const {

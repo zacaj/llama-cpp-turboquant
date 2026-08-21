@@ -32,6 +32,7 @@ if [ "$CTX" -lt 1000 ]; then
     echo "Usage: kld-run-matrix.sh <model-filename> <reference-file> [ctx] [chunks] [results-file]" >&2
     exit 1
 fi
+OUTPUT_DIR="${OUTPUT_DIR:-/mnt/llm/models/kld-reference}"
 RESULTS="${5:-${OUTPUT_DIR}/$(basename "$MODEL" .gguf)-matrix-${CTX}ctx.tsv}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -93,7 +94,7 @@ print_summary() {
     else
         local conv_note=""
         [ "$converged" = "1" ] && conv_note=" (early-stopped)"
-        echo "  -> ${ctk}/${ctv}: precision=${precision}%  mean_kld=${mean_kld}+/-${mean_kld_stderr}  chunks=${chunks_used}${conv_note}  size=${pct_f16}% of f16  ppl_base=${ppl_base}  kld/ppl=${kld_per_ppl}" >&2
+        echo "  -> ${ctk}/${ctv}: precision=${precision}%  same_top=${same_top}%  mean_kld=${mean_kld}+/-${mean_kld_stderr}  kld999=${kld999}  chunks=${chunks_used}${conv_note}  size=${pct_f16}% of f16  ppl_base=${ppl_base}  kld/ppl=${kld_per_ppl}" >&2
     fi
 }
 
@@ -157,18 +158,26 @@ echo "real quantization-robustness difference. kld_per_ppl (mean_kld / ppl_base)
 echo "rigorously derived, normalization of that same idea into one number -- use it as a rough cue"
 echo "when eyeballing this model's numbers against another model's, not as a precise ranking metric."
 echo ""
-echo "| K / V | bpw (K/V) | % of f16 size | 99.9% precision | tail n | chunks used | Mean KLD (+/- stderr) | ppl_base | kld_per_ppl |"
-echo "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+echo "Same top p is the fraction of tokens where the quantized combo's argmax still matches the"
+echo "bf16 reference's argmax -- a direct rare-event-flip rate, not a smoothed statistic like mean"
+echo "KLD. This is the number to read for verbatim-copy failures (a wrong token in a file path,"
+echo "not a shift in tone): a combo can have a fine mean KLD while still flipping argmax on a"
+echo "handful of tokens per thousand, since one flipped token barely moves a mean over the whole"
+echo "corpus. 99.9% KLD is the complementary per-token severity view -- how bad the worst ~0.1%"
+echo "of tokens get, vs same-top-p's how-often. Both are included below alongside mean KLD."
+echo ""
+echo "| K / V | bpw (K/V) | % of f16 size | 99.9% precision | same top p | 99.9% KLD | tail n | chunks used | Mean KLD (+/- stderr) | ppl_base | kld_per_ppl |"
+echo "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
 
 tail -n +2 "$RESULTS" | while IFS=$'\t' read -r ctk ctv bpw_k bpw_v total_bpw pct_f16 mean_kld mean_kld_stderr kld999 tail_n chunks_used converged precision ppl_q ppl_base same_top kld_per_ppl dump_file log_file; do
     if [ "$mean_kld" = "ERROR" ]; then
-        echo "| ${ctk} / ${ctv} | ${bpw_k}/${bpw_v} | ${pct_f16}% | FAILED | -- | -- | -- | -- | -- |"
+        echo "| ${ctk} / ${ctv} | ${bpw_k}/${bpw_v} | ${pct_f16}% | FAILED | -- | -- | -- | -- | -- | -- | -- |"
     else
         chunks_disp="$chunks_used"
         if [ "$converged" = "1" ]; then
             chunks_disp="${chunks_used} (early-stopped)"
         fi
-        echo "| ${ctk} / ${ctv} | ${bpw_k}/${bpw_v} | ${pct_f16}% | ${precision}% | ${tail_n} | ${chunks_disp} | ${mean_kld} +/- ${mean_kld_stderr} | ${ppl_base} | ${kld_per_ppl} |"
+        echo "| ${ctk} / ${ctv} | ${bpw_k}/${bpw_v} | ${pct_f16}% | ${precision}% | ${same_top}% | ${kld999} | ${tail_n} | ${chunks_disp} | ${mean_kld} +/- ${mean_kld_stderr} | ${ppl_base} | ${kld_per_ppl} |"
     fi
 done
 } | tee "$MD_PATH"
