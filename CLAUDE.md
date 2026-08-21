@@ -122,6 +122,9 @@ purpose and usage. Update this list if you significantly change a script's inter
   JSON (plus `--text-dir` for plain-text renders). The jsonl is a uuid *tree*, not a log: resume
   replays records verbatim and rewind forks history, so it dedupes by uuid and walks root-to-leaf,
   emitting one segment per root. Do not size or select segments by `compactMetadata.preTokens` —
+- `tokenize_prompt_logs.py` — real token counts for prompt-log JSON from either corpus (proxy logs
+  or session segments), via `llama-tokenize` in the container. `prompt_chars` is a poor size proxy
+  (chars/token ranges 1.41-4.01), so a char threshold cannot select "segments over 100k tokens".
 - `corpus-holdout-slice.sh` — cut an untouched tail slice out of a corpus already consumed (by
   `--chunks N`) for imatrix generation, for a no-overlap PPL eval set.
 - `corpus-token-sample.sh` - cut a byte prefix from a corpus sized to land near a target token
