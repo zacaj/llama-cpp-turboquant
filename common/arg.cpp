@@ -2534,6 +2534,28 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_examples({LLAMA_EXAMPLE_PERPLEXITY}));
     add_opt(common_arg(
+        {"--ppl-first"}, "N",
+        "first position in each window to score (default: n_ctx/2, 0 = score the whole window)",
+        [](common_params & params, int value) {
+            params.ppl_first = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_PERPLEXITY}));
+    add_opt(common_arg(
+        {"--ppl-copy-window"}, "N",
+        "add entropy/copy-mass columns to --ppl-token-dump, treating the last N tokens as recent "
+        "(default: 0 = off, 256 is a reasonable choice)",
+        [](common_params & params, int value) {
+            params.ppl_copy_window = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_PERPLEXITY}));
+    add_opt(common_arg(
+        {"--ppl-token-dump"}, "FNAME",
+        "write a per-token TSV (chunk, window position, token id, prob) for position-binned analysis",
+        [](common_params & params, const std::string & value) {
+            params.ppl_token_dump = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_PERPLEXITY}));
+    add_opt(common_arg(
         {"-dt", "--defrag-thold"}, "N",
         string_format("KV cache defragmentation threshold (DEPRECATED)"),
         [](common_params & params, const std::string & value) {

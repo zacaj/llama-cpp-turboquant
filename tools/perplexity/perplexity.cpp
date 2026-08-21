@@ -69,6 +69,70 @@ static results_log_softmax log_softmax(int n_vocab, const float * logits, int to
     return {logits[tok] - max_logit - log(sum_exp), logits[tok], expf(logits[tok] - max_logit) / (float) sum_exp};
 }
 
+struct copy_result {
+    float entropy   = 0.0f;
+    float copy_near = 0.0f;
+    float copy_far  = 0.0f;
+};
+
+// Distribution shape alongside the usual NLL. NLL says whether the model got the answer right;
+// these say what kind of answer it was giving, which is what a drift into copy mode looks like
+// and what NLL is structurally blind to (degenerate repetition has very low perplexity).
+//
+//   entropy    of the full predicted distribution
+//   copy_near  probability mass on token ids present in the last `near_w` tokens
+//   copy_far   mass on ids seen earlier in the window but not in that recent slice
+//
+// A token occurring both near and far is attributed to near, so the two never double count.
+// first_occ[v] is the first position in this chunk where v appears (INT32_MAX if never), which
+// makes "already seen by position pc" a single comparison inside the vocab scan.
+static results_log_softmax log_softmax_ex(
+    int n_vocab, const float * logits, int tok,
+    const int32_t * first_occ, int pc, const llama_token * chunk_tokens, int near_w,
+    copy_result * out
+) {
+    float max_logit = logits[0];
+    for (int i = 1; i < n_vocab; ++i) {
+        max_logit = std::max(max_logit, logits[i]);
+    }
+    double sum_exp = 0.0;
+    for (int i = 0; i < n_vocab; ++i) {
+        sum_exp += expf(logits[i] - max_logit);
+    }
+    const float log_sum_exp = log(sum_exp);
+
+    if (out) {
+        double ent = 0.0, seen = 0.0;
+        for (int i = 0; i < n_vocab; ++i) {
+            const float lp = logits[i] - max_logit - log_sum_exp;
+            const float p  = expf(lp);
+            if (p > 1e-9f) {
+                ent -= p * lp;
+            }
+            if (first_occ[i] <= pc) {
+                seen += p;
+            }
+        }
+        // walk the recent slice rather than the vocabulary: it is a few hundred entries against
+        // ~150k. reused across calls so this does not allocate per token.
+        static thread_local std::vector<llama_token> uniq;
+        const int lo = std::max(0, pc - near_w + 1);
+        uniq.assign(chunk_tokens + lo, chunk_tokens + pc + 1);
+        std::sort(uniq.begin(), uniq.end());
+        uniq.erase(std::unique(uniq.begin(), uniq.end()), uniq.end());
+        double near = 0.0;
+        for (llama_token t : uniq) {
+            near += expf(logits[t] - max_logit - log_sum_exp);
+        }
+        out->entropy   = (float) ent;
+        out->copy_near = (float) near;
+        out->copy_far  = (float) std::max(0.0, seen - near);
+    }
+
+    return {logits[tok] - max_logit - log_sum_exp, logits[tok],
+            expf(logits[tok] - max_logit) / (float) sum_exp};
+}
+
 static inline int nearest_int(float fval) {
     //assert(fval <= 4194303.f);
     float val = fval + 12582912.f;
@@ -106,13 +170,26 @@ static double log_softmax(int n_vocab, const float * logits, uint16_t * log_prob
     return max_logit + log_sum_exp - logits[tok];
 }
 
+// copy_ctx carries everything the optional distribution-shape stats need. null `first_occ`
+// disables them entirely, so the default perplexity path costs exactly what it did before.
+struct copy_ctx {
+    const int32_t     * first_occ     = nullptr;
+    const llama_token * chunk_tokens  = nullptr;
+    int                 pc0           = 0;  // position within the chunk of logits row 0
+    int                 near_w        = 0;
+    float             * ent_history   = nullptr;
+    float             * near_history  = nullptr;
+    float             * far_history   = nullptr;
+};
+
 static void process_logits(
     int n_vocab, const float * logits, const int * tokens, int n_token, std::vector<std::thread> & workers,
-    double & nll, double & nll2, float * logit_history, float * prob_history
+    double & nll, double & nll2, float * logit_history, float * prob_history,
+    const copy_ctx & cc = copy_ctx()
 ) {
     std::mutex mutex;
     int counter = 0;
-    auto compute = [&mutex, &counter, &nll, &nll2, logit_history, prob_history, n_vocab, logits, tokens, n_token] () {
+    auto compute = [&mutex, &counter, &nll, &nll2, logit_history, prob_history, n_vocab, logits, tokens, n_token, &cc] () {
         double local_nll  = 0;
         double local_nll2 = 0;
         while (true) {
@@ -123,13 +200,22 @@ static void process_logits(
                 break;
             }
             lock.unlock();
-            const results_log_softmax results = log_softmax(n_vocab, logits + size_t(i)*n_vocab, tokens[i+1]);
+            copy_result cr;
+            const results_log_softmax results = log_softmax_ex(
+                    n_vocab, logits + size_t(i)*n_vocab, tokens[i+1],
+                    cc.first_occ, cc.pc0 + i, cc.chunk_tokens, cc.near_w,
+                    cc.first_occ ? &cr : nullptr);
             const double v = -results.log_softmax;
             local_nll += v;
             local_nll2 += v*v;
 
             logit_history[i] = results.logit;
             prob_history[i]  = results.prob;
+            if (cc.first_occ) {
+                cc.ent_history [i] = cr.entropy;
+                cc.near_history[i] = cr.copy_near;
+                cc.far_history [i] = cr.copy_far;
+            }
         }
     };
     for (auto & w : workers) {
@@ -438,6 +524,32 @@ static results_perplexity perplexity_v2(llama_context * ctx, const common_params
     }
     LOG("\n");
 
+    if (!params.ppl_token_dump.empty()) {
+        std::ofstream dump(params.ppl_token_dump.c_str());
+        if (dump) {
+            // same columns as the whole-window dump so the two can be joined on `pos`. here each
+            // window only contributes its last `ppl_stride` predictions, so `depth` stays inside
+            // [n_ctx - ppl_stride, n_ctx) instead of growing with position - that bounded depth is
+            // the point of running this arm.
+            // note prob_history is indexed by the predicted position here, but by the predicting
+            // position in perplexity() above; that mismatch predates this dump, so the two loops
+            // read it differently on purpose.
+            dump << "# mode=stride n_ctx=" << n_ctx << " stride=" << params.ppl_stride
+                 << " n_chunk=" << n_chunk << "\n";
+            dump << "chunk\tpos\tdepth\ttoken\tprob\n";
+            for (int i = 0; i < n_chunk; ++i) {
+                const int start = i * params.ppl_stride;
+                for (int j = n_ctx - params.ppl_stride - 1; j < n_ctx - 1; ++j) {
+                    const int q = start + j + 1;
+                    dump << i << "\t" << q << "\t" << (q - start) << "\t" << tokens[q] << "\t"
+                         << prob_history[q] << "\n";
+                }
+            }
+        } else {
+            LOG_ERR("%s: failed to open --ppl-token-dump path %s\n", __func__, params.ppl_token_dump.c_str());
+        }
+    }
+
     return {tokens, std::exp(nll / count), logit_history, prob_history};
 }
 
@@ -477,8 +589,10 @@ static results_perplexity perplexity(llama_context * ctx, const common_params & 
     auto tim2 = std::chrono::high_resolution_clock::now();
     LOG_INF("%s: tokenization took %g ms\n",__func__,1e-3*std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count());
 
-    if (int(tokens.size()) < 2*n_ctx) {
-        LOG_ERR("%s: you need at least %d tokens to evaluate perplexity with a context of %d\n",__func__,2*n_ctx,
+    // one full window is enough: a long-context run scores a single document meant to fill the
+    // window exactly, so requiring two would reject every input it is built for.
+    if (int(tokens.size()) < n_ctx) {
+        LOG_ERR("%s: you need at least %d tokens to evaluate perplexity with a context of %d\n",__func__,n_ctx,
                 n_ctx);
         LOG_ERR("%s: the data file you provided tokenizes to only %zu tokens\n",__func__,tokens.size());
         return {std::move(tokens), 0., {}, {}};
@@ -489,6 +603,14 @@ static results_perplexity perplexity(llama_context * ctx, const common_params & 
 
     std::vector<float> prob_history;
     prob_history.resize(tokens.size());
+
+    const bool want_copy = params.ppl_copy_window > 0 && !params.ppl_token_dump.empty();
+    std::vector<float> ent_history, near_history, far_history;
+    if (want_copy) {
+        ent_history .resize(tokens.size());
+        near_history.resize(tokens.size());
+        far_history .resize(tokens.size());
+    }
 
     const int n_chunk_max = tokens.size() / n_ctx;
 
@@ -507,12 +629,15 @@ static results_perplexity perplexity(llama_context * ctx, const common_params & 
     GGML_ASSERT(n_batch < n_ctx || n_batch % n_ctx == 0);
     GGML_ASSERT(params.n_ctx == n_seq * n_ctx);
 
-    llama_batch batch = llama_batch_init(std::min(n_batch, n_ctx*n_seq), 0, 1);
+    // score each batch's logits as it comes back rather than accumulating a whole window first.
+    // a window costs n_ctx*n_vocab floats - ~80 GB at n_ctx=128K on a 152K vocab - while a batch
+    // costs n_batch*n_vocab. this does not change what the model sees: NLL is a sum, and the KV
+    // cache, which is what actually carries the long context, is untouched.
+    // the assert above means n_batch < n_ctx (so num_batches > 1) forces n_seq == 1, hence a
+    // batch's output rows are always consecutive positions of a single sequence.
+    const bool stream_logits = num_batches > 1;
 
-    std::vector<float> logits;
-    if (num_batches > 1) {
-        logits.reserve(size_t(n_ctx) * n_vocab);
-    }
+    llama_batch batch = llama_batch_init(std::min(n_batch, n_ctx*n_seq), 0, 1);
 
     LOG_INF("%s: calculating perplexity over %d chunks, n_ctx=%d, batch_size=%d, n_seq=%d\n", __func__, n_chunk, n_ctx, n_batch, n_seq);
 
@@ -524,7 +649,12 @@ static results_perplexity perplexity(llama_context * ctx, const common_params & 
         logits_stream.write((const char *)&n_chunk, sizeof(n_chunk));
         logits_stream.write((const char *)tokens.data(), n_chunk*n_ctx*sizeof(tokens[0]));
         const int nv = 2*((n_vocab + 1)/2) + 4;
-        log_probs.resize(size_t(n_ctx) * nv);
+        // size_t cast: int * int overflows on Qwen-class large-vocab models at
+        // n_ctx >= 16K (e.g. n_ctx=16384 * nv=151940 = 2.49B > INT32_MAX=2.15B);
+        // overflow wraps negative, sign-extends to a giant size_t when passed to
+        // resize(), trips vector::max_size and throws std::length_error. Matches
+        // the existing size_t cast on line 514 above for the same reason.
+        log_probs.resize(size_t(stream_logits ? n_batch : n_ctx) * nv);
     }
 
     // We get the logits for all the tokens in the context window (params.n_ctx)
@@ -539,7 +669,48 @@ static results_perplexity perplexity(llama_context * ctx, const common_params & 
     // Example, we have a context window of 512, we will compute perplexity for each of the
     // last 256 tokens.  Then, we split the input up into context window size chunks to
     // process the entire prompt.
-    const int first = n_ctx/2;
+    //
+    // --ppl-first overrides the halfway default. 0 scores the whole window, which is what a
+    // loss-vs-position curve needs; the first few hundred positions then carry the usual
+    // no-context-yet penalty, which is the expected left edge of that curve rather than an error.
+    const int first = params.ppl_first >= 0 ? std::min(params.ppl_first, n_ctx - 1) : n_ctx/2;
+
+    // score n_token consecutive logit rows, the first of which is the prediction made at absolute
+    // token position pos0. shared by the streaming and whole-window paths so they cannot drift.
+    // first occurrence of each vocab id within the current chunk, rebuilt per chunk. lets the
+    // "has this token been seen yet" test be one comparison inside the vocab scan that
+    // log_softmax already makes, instead of a per-position set lookup.
+    std::vector<int32_t> first_occ;
+
+    auto score_rows = [&](int pos0, int n_token, const float * rows) {
+        if (n_token <= 0) {
+            return;
+        }
+        if (!params.logits_file.empty()) {
+            process_logits(logits_stream, n_vocab, rows,
+                    tokens.data() + pos0, n_token,
+                    workers, log_probs, nll, nll2);
+        } else {
+            copy_ctx cc;
+            if (want_copy) {
+                const int chunk_start = (pos0 / n_ctx) * n_ctx;
+                cc.first_occ    = first_occ.data();
+                cc.chunk_tokens = tokens.data() + chunk_start;
+                cc.pc0          = pos0 - chunk_start;
+                cc.near_w       = params.ppl_copy_window;
+                cc.ent_history  = ent_history .data() + pos0;
+                cc.near_history = near_history.data() + pos0;
+                cc.far_history  = far_history .data() + pos0;
+            }
+            process_logits(n_vocab, rows,
+                    tokens.data() + pos0, n_token,
+                    workers, nll, nll2,
+                    logit_history.data() + pos0,
+                    prob_history.data()  + pos0,
+                    cc);
+        }
+        count += n_token;
+    };
 
     for (int i = 0; i < n_chunk; i += n_seq) {
         const int start =     i * n_ctx;
@@ -548,6 +719,16 @@ static results_perplexity perplexity(llama_context * ctx, const common_params & 
         const int n_seq_batch = std::min(n_seq, n_chunk - i);
 
         const auto t_start = std::chrono::high_resolution_clock::now();
+
+        if (want_copy) {
+            first_occ.assign(n_vocab, INT32_MAX);
+            for (int k = 0; k < n_ctx; ++k) {
+                int32_t & fo = first_occ[tokens[start + k]];
+                if (fo == INT32_MAX) {
+                    fo = k;
+                }
+            }
+        }
 
         // clear the KV cache
         llama_memory_clear(llama_get_memory(ctx), true);
@@ -591,9 +772,14 @@ static results_perplexity perplexity(llama_context * ctx, const common_params & 
                 return {tokens, -1, logit_history, prob_history};
             }
 
-            if (num_batches > 1 && n_outputs > 0) {
-                const auto * batch_logits = llama_get_logits(ctx);
-                logits.insert(logits.end(), batch_logits, batch_logits + size_t(n_outputs) * n_vocab);
+            if (stream_logits && n_outputs > 0) {
+                // this batch covers window positions [j*n_batch, j*n_batch + batch_size), with
+                // rows only for those at or past `first`. the last position of the window has no
+                // next token to score against; every other batch boundary is fine, since the next
+                // token comes from `tokens` rather than from this batch's rows.
+                const int o0      = std::max(j*n_batch, first);
+                const int n_score = std::min(n_outputs, n_ctx - 1 - o0);
+                score_rows(start + o0, n_score, llama_get_logits(ctx));
             }
         }
 
@@ -612,21 +798,10 @@ static results_perplexity perplexity(llama_context * ctx, const common_params & 
         }
 
         for (int seq = 0; seq < n_seq_batch; seq++) {
-            const float * all_logits = num_batches > 1 ? logits.data() : llama_get_logits_ith(ctx, seq*n_ctx + first);
-
-            llama_token * tokens_data = tokens.data() + start + seq*n_ctx + first;
-            if (!params.logits_file.empty()) {
-                process_logits(logits_stream, n_vocab, all_logits,
-                        tokens_data, n_ctx - 1 - first,
-                        workers, log_probs, nll, nll2);
-            } else {
-                process_logits(n_vocab, all_logits,
-                        tokens_data, n_ctx - 1 - first,
-                        workers, nll, nll2,
-                        logit_history.data() + start + seq*n_ctx + first,
-                        prob_history.data()  + start + seq*n_ctx + first);
+            if (!stream_logits) {
+                score_rows(start + seq*n_ctx + first, n_ctx - 1 - first,
+                        llama_get_logits_ith(ctx, seq*n_ctx + first));
             }
-            count += n_ctx - first - 1;
 
             // perplexity is e^(average negative log-likelihood)
             if (params.ppl_output_type == 0) {
@@ -640,10 +815,39 @@ static results_perplexity perplexity(llama_context * ctx, const common_params & 
                 LOG("%8d  %.4lf  %4lf  %4lf\n", i*n_ctx, std::exp(nll / count), av, av2);
             }
         }
-
-        logits.clear();
     }
     LOG("\n");
+
+    if (!params.ppl_token_dump.empty()) {
+        std::ofstream dump(params.ppl_token_dump.c_str());
+        if (dump) {
+            // prob_history[q - 1] is the probability given to tokens[q], so `pos` is the position
+            // of the token being predicted - that is what a position curve bins on. `depth` is how
+            // many tokens of context the model had for it, which is what distinguishes this from
+            // the strided run over the same document.
+            dump << "# mode=window n_ctx=" << n_ctx << " first=" << first << " n_chunk=" << n_chunk
+                 << " copy_window=" << (want_copy ? params.ppl_copy_window : 0) << "\n";
+            dump << "chunk\tpos\tdepth\ttoken\tprob";
+            if (want_copy) {
+                dump << "\tentropy\tcopy_near\tcopy_far";
+            }
+            dump << "\n";
+            for (int i = 0; i < n_chunk; ++i) {
+                const int start = i * n_ctx;
+                for (int q = start + first + 1; q < start + n_ctx; ++q) {
+                    dump << i << "\t" << q << "\t" << (q - start) << "\t" << tokens[q] << "\t"
+                         << prob_history[q - 1];
+                    if (want_copy) {
+                        dump << "\t" << ent_history[q - 1] << "\t" << near_history[q - 1]
+                             << "\t" << far_history[q - 1];
+                    }
+                    dump << "\n";
+                }
+            }
+        } else {
+            LOG_ERR("%s: failed to open --ppl-token-dump path %s\n", __func__, params.ppl_token_dump.c_str());
+        }
+    }
 
     nll2 /= count;
     nll /= count;

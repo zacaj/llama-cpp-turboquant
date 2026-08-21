@@ -118,6 +118,15 @@ purpose and usage. Update this list if you significantly change a script's inter
 - `imatrix-gen.sh`, `imatrix-combine.sh` — generate/merge importance matrices from a text corpus
   for a model; combine is token-count-weighted, not a naive average.
 - `perplexity-run.sh` — run `llama-perplexity` against a corpus, print final PPL.
+- `ppl-context-curve.sh` + `merge_context_curve.py` — measure how much a model actually gains from
+  distant context, per position. Runs each segment twice (a deep arm at full context with
+  `--ppl-first 0 --chunks 1`, and a shallow arm at small `-c` with `--ppl-stride`), then subtracts
+  their per-token NLL. Both arms score identical tokens, so content difficulty cancels and the
+  remaining gap is attributable to context depth — the deep arm's own curve is *not* usable alone,
+  since later parts of a session are more repetitive and that moves NLL more than depth does. The
+  gap should be ~0 at the earliest joined positions (where the shallow window still covers
+  everything), which is a free per-run correctness check. Stats are clustered by segment, not
+  token, since tokens within a session are correlated.
 - `extract_session_corpus.py` — convert Claude Code `.jsonl` session logs into prompt-logger-shaped
   JSON (plus `--text-dir` for plain-text renders). The jsonl is a uuid *tree*, not a log: resume
   replays records verbatim and rewind forks history, so it dedupes by uuid and walks root-to-leaf,

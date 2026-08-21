@@ -559,6 +559,18 @@ struct common_params {
     int32_t ppl_output_type = 0;     // = 0 -> ppl output is as usual, = 1 -> ppl output is num_tokens, ppl, one per line
                                      //                                       (which is more convenient to use for plotting)
                                      //
+    // ppl_first: first position in each window to score. < 0 keeps the historical n_ctx/2, which
+    // collapses the whole window into one number; 0 scores everything, which is what a
+    // loss-vs-position curve needs.
+    int32_t ppl_first       = -1;
+    // ppl_token_dump: path for a per-token TSV (window position, token id, prob). Position-binned
+    // NLL is then a groupby in whatever plots it, rather than more accumulators in here.
+    std::string ppl_token_dump = "";
+    // ppl_copy_window: > 0 adds entropy and copy-mass columns to that dump, with this many tokens
+    // counted as the "recent" window. NLL cannot see a drift into copying, since degenerate
+    // repetition scores very low perplexity; distribution shape can.
+    int32_t ppl_copy_window = 0;
+
     bool   hellaswag        = false; // compute HellaSwag score over random tasks from datafile supplied in prompt
     size_t hellaswag_tasks  = 400;   // number of tasks to use when computing the HellaSwag score
 
