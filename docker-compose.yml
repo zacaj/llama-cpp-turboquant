@@ -8,7 +8,7 @@ services:
             dockerfile: .devops/cuda.Dockerfile
             target: full
             args:
-                CUDA_DOCKER_ARCH: "120"
+                CUDA_DOCKER_ARCH: "120a"
                 GIT_COMMIT: "${GIT_COMMIT:-unknown}"
                 GIT_COUNT: "${GIT_COUNT:-0}"
         deploy:
@@ -25,6 +25,7 @@ services:
         volumes:
             - /mnt/llm/llama.cpp/models:/models
             - /mnt/2508/Backup 2:/models2
+            - /mnt/2508/Archive:/models3
             - ./data/logs:/logs
             - ./data/cache:/cache
         ipc: host
@@ -193,30 +194,53 @@ services:
         # 150k spec2 q8/t3 t3/t3 65% 120t/s | 20260625_023924_548006 37% 57tg 817pg
         #              ngram+mtp 60% 56% 115t/s | 46% 73tg 820pg                         best 150k opus
         # 150k spec2+n q5/q5 t3/t3 40-70% 95-115t/s | 795pg, 35% 58tg @238, 57% 82tg @ 611
+        command: >
+             --server --host 0.0.0.0 --port 8080 --jinja --chat-template-file /models/chat_template.jinja
+             -lv 4 --log-timestamps --log-colors on
+             --checkpoint-min-step 4000 --ctx-checkpoints 32
+             --cache-prompt --cache-ram -1
+             -m /models2/Agents-A1-unsloth-UD-IQ3_XXS-MTP-zacaj.gguf --alias "Qwen3.6-35B-A3B"
+             --n-gpu-layers 99
+             --n-cpu-moe 0
+             --ctx-size 60000
+             --keep 20000 --context-shift
+             --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
+             -b 2048 -ub 512
+             --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+             --flash-attn on
+             -ctk q8_0 -ctv q6_0 --kv-unified
+             --spec-draft-type-k turbo4
+             --spec-draft-type-v turbo4
+             --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+             --spec-type draft-mtp --spec-draft-n-max 2
+             --spec-draft-ctx-size 8192
+        # qwen 35 creative
         # command: >
-        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      --server --host 0.0.0.0 --port 8080 --jinja --chat-template-file /models/chat_template.jinja
         #      --n-gpu-layers 99
         #      -lv 4 --log-timestamps --log-colors on
         #      --checkpoint-min-step 4000 --ctx-checkpoints 32
-        #      --cache-prompt --cache-ram -1
-        #      -m /models/Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.gguf --alias "Qwen3.6-35B-A3B"  
+        #      -m /models/Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.pruned-summary.weighted-n48.gguf  --alias "Qwen3.6-35B-A3B"  
         #      --n-cpu-moe 0
         #      --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
         #      --ctx-size 150000 
-        #      -b 2048 -ub 128
+        #      -b 2048 -ub 512
         #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
         #      --flash-attn on 
-        #      --keep 20000 --context-shift
-        #      -ctk q5_1 -ctv q5_0 --kv-unified 
-        #      --spec-draft-type-k turbo4
-        #      --spec-draft-type-v turbo4
-        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
-        #      --spec-type draft-mtp,ngram-mod --spec-draft-n-max 2
-        #      --spec-draft-ctx-size 8192
-        #      --spec-ngram-mod-n-match 13
+        #      -ctk q8_0 -ctv q6_0 --kv-unified 
+        #      --mmproj /models2/Qwen3.6-35B-A3B-unsloth.mmproj.gguf
+        #      --cache-prompt --cache-ram -1
+            #  --spec-draft-type-k turbo4
+            #  --spec-draft-type-v turbo4
+            #  --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+            #  --spec-type draft-mtp --spec-draft-n-max 2
+            #  --spec-draft-ctx-size 8192
+            #  --override-kv qwen35moe.expert_used_count=int:8
+            #  --keep 20000 --context-shift
+        #      --spec-ngram-mod-n-match 16
         #      --spec-ngram-mod-n-min 8
         #      --spec-ngram-mod-n-max 24
-            #  --dry-multiplier 0.5 --dry-allowed-length 4 --dry-base 1.75 --dry-penalty-last-n 4096
+            #  --dry-multiplier 0.1 --dry-allowed-length 4 --dry-base 1.75 --dry-penalty-last-n 256
             #  --xtc-probability 0.5 --xtc-threshold 0.1
             #  --repeat-penalty 1.0 --repeat-last-n 256
             #  --moe-profile-dir /logs/moe-profiles/
@@ -283,6 +307,30 @@ services:
         # #     --chat-template-kwargs '{"disable_thinking":true}'
         # # --chat-template-kwargs '{"preserve_thinking":true}'
 
+            #  --server --host 0.0.0.0 --port 8080 --jinja --chat-template-file /models/chat_template.jinja
+            #  --n-gpu-layers 99
+            #  -lv 4 --log-timestamps --log-colors on
+            #  --checkpoint-min-step 4000 --ctx-checkpoints 32
+            #  --cache-prompt --cache-ram -1
+            #  -m /models3/pruned/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-UD-IQ4_XS-MTP-mudler.pruned-no-entropy.claude.wiki.bart.weighted-n68.gguf --alias "Qwen3.6-35B-A3B"  
+            #  --n-cpu-moe 0
+            #  --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
+            #  --ctx-size 110000 
+            #  -b 2048 -ub 512
+            #  --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+            #  --flash-attn on 
+            #  --keep 20000 --context-shift
+            #  -ctk q8_0 -ctv q6_0 --kv-unified 
+            #  --override-kv qwen35moe.expert_used_count=int:8
+            #  --spec-draft-type-k turbo4
+            #  --spec-draft-type-v turbo4
+            #  --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+            #  --spec-type draft-mtp --spec-draft-n-max 2
+            #  --spec-draft-ctx-size 8192
+            #  --spec-ngram-mod-n-match 16
+            #  --spec-ngram-mod-n-min 8
+            #  --spec-ngram-mod-n-max 24
+            #  --dry-multiplier 0.1 --dry-allowed-length 4 --dry-base 1.75 --dry-penalty-last-n 256
         # Ornith
         # 150k spec2+ng q5/q5 8k t3/t3  50-70% 110tg  | 845pe,  47%@182,452 69tg,83tg | 20260713_131120_311664.json 705pe 55% 61tg 136k tokens
         # command: >
@@ -294,47 +342,99 @@ services:
         #     -m /models/Ornith-1.0-35B-unsloth-UD-IQ3_XXS-MTP-zacaj.gguf --alias "Qwen3.6-35B-A3B"  
         #     --n-cpu-moe 0
         #     --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
-        #     --ctx-size 200000 
+        #     --ctx-size 125000 
         #     -b 2048 -ub 128
         #     --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
         #     --flash-attn on 
         #     --keep 20000 --context-shift
-        #     -ctk q5_0 -ctv q5_0 --kv-unified 
+        #      -ctk q8_0 -ctv q8_0 --kv-unified 
         #     --spec-draft-type-k turbo4
         #     --spec-draft-type-v turbo4
         #     --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
-        #     --spec-type draft-mtp,ngram-mod --spec-draft-n-max 2
+        #     --spec-type draft-mtp --spec-draft-n-max 2
         #     --spec-draft-ctx-size 8192
         #     --spec-ngram-mod-n-match 16
         #     --spec-ngram-mod-n-min 8
         #     --spec-ngram-mod-n-max 24
+        #      --dry-multiplier 0.2 --dry-allowed-length 4 --dry-base 1.75 --dry-penalty-last-n 50
 
         # Agents-A1-unsloth-UD-IQ3_XXS-MTP-zacaj.gguf
         # 150k spec2+ng q5/q5 8k t3/t3  60% 110tg | 810pe 40-50tg 25% | 150k 700pe
         #      spec1+ng                           |   70tg 42%
         # command: >
-        #     --server --host 0.0.0.0 --port 8080 --jinja
-        #     --n-gpu-layers 99
-        #     -lv 4 --log-timestamps --log-colors on
-        #     --checkpoint-min-step 4000 --ctx-checkpoints 32
-        #     --cache-prompt --cache-ram -1
-        #     -m /models/Agents-A1-unsloth-UD-IQ3_XXS-MTP-zacaj.gguf --alias "Qwen3.6-35B-A3B"  
-        #     --n-cpu-moe 0
-        #     --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
-        #     --ctx-size 150000 
-        #     -b 2048 -ub 128
-        #     --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
-        #     --flash-attn on 
-        #     --keep 20000 --context-shift
-        #     -ctk q5_0 -ctv q5_0 --kv-unified 
-        #     --spec-draft-type-k turbo4
-        #     --spec-draft-type-v turbo4
-        #     --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
-        #     --spec-type draft-mtp,ngram-mod --spec-draft-n-max 1
-        #     --spec-draft-ctx-size 8192
-        #     --spec-ngram-mod-n-match 16
-        #     --spec-ngram-mod-n-min 8
-        #     --spec-ngram-mod-n-max 24
+        #      --server --host 0.0.0.0 --port 8080 --jinja --chat-template-file /models/chat_template.jinja
+        #      --n-gpu-layers 99
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models/Agents-A1-unsloth-UD-IQ3_XXS-MTP-zacaj.gguf --alias "Qwen3.6-35B-A3B"  
+        #      --n-cpu-moe 0
+        #      --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      --ctx-size 150000 
+        #      -b 2048 -ub 512
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on 
+        #      --keep 20000 --context-shift
+        #      -ctk q8_0 -ctv q8_0 --kv-unified 
+        #      --spec-draft-type-k turbo4
+        #      --spec-draft-type-v turbo4
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp,ngram-mod --spec-draft-n-max 2
+        #      --spec-draft-ctx-size 8192
+        #      --spec-ngram-mod-n-match 16
+        #      --spec-ngram-mod-n-min 8
+        #      --spec-ngram-mod-n-max 24
+        #      --dry-multiplier 0.2 --dry-allowed-length 4 --dry-base 1.75 --dry-penalty-last-n 50
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja --chat-template-file /models/chat_template.jinja
+        #      --n-gpu-layers 99
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models2/Darwin-35B-A3B-Opus-unsloth-UD-IQ3_XXS-MTP-zacaj.gguf --alias "Qwen3.6-35B-A3B"  
+        #      --n-cpu-moe 0
+        #      --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      --ctx-size 150000 
+        #      -b 2048 -ub 512
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on 
+        #      --keep 20000 --context-shift
+        #      -ctk q8_0 -ctv q8_0 --kv-unified 
+        #      --spec-draft-type-k turbo4
+        #      --spec-draft-type-v turbo4
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp,ngram-mod --spec-draft-n-max 2
+        #      --spec-draft-ctx-size 8192
+        #      --spec-ngram-mod-n-match 16
+        #      --spec-ngram-mod-n-min 8
+        #      --spec-ngram-mod-n-max 24
+        #      --dry-multiplier 0.2 --dry-allowed-length 4 --dry-base 1.75 --dry-penalty-last-n 200
+
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models2/Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-unsloth.gguf --alias "Qwen3.6-35B-A3B"
+        #      --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      --ctx-size 60 --n-gpu-layers 99 --n-cpu-moe 18
+        #      -b 2048 -ub 2048
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on 
+        #      --keep 20000 --context-shift
+        #      -ctk q8_0 -ctv q6_0 --kv-unified 
+        #      --threads 8
+        #      --fit-target 100
+        #      --spec-draft-type-k turbo4
+        #      --spec-draft-type-v turbo4
+        #      --spec-type draft-mtp,ngram-mod --spec-draft-n-max 2
+        #      --spec-draft-ctx-size 8192
+        #      --spec-ngram-mod-n-match 16
+        #      --spec-ngram-mod-n-min 8
+        #      --spec-ngram-mod-n-max 24
+
+            #  --dry-multiplier 0.2 --dry-allowed-length 4 --dry-base 1.75 --dry-penalty-last-n 50
+
 
         # GLM MTP
         # 100k q50 ngram16 spec2 105tg 48% | 550pe 40% 50tg
@@ -404,30 +504,34 @@ services:
         # 120k q8/6 ot=gpu 46tg 48-55% | 35-45tg 730pe 42-52%  | 16310 = 79 + 14666 = 10486+4166+64 +1564
         # 120k q8/6 vp=cpu |   | 16310 =  45 + 14666 = 10486+4166+64 +1598
         # 120k q8/6 vp=gpu |   | 16310 = 157 + 14666 = 10486+4166+64 +1486
-        command: >
-             --server --host 0.0.0.0 --port 8080 --jinja
-             --n-gpu-layers 99
-             -lv 4 --log-timestamps --log-colors on
-             --checkpoint-min-step 4000 --ctx-checkpoints 32
-             --cache-prompt --cache-ram -1
-             -m /models2/Qwen3.6-27B-IQ4_XS-uniform-imat-zacaj.gguf --alias "Qwen3.6-35B-A3B"
-             --n-cpu-moe 0
-             --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
-             --ctx-size 60000 
-             -b 2048 -ub 128
-             --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
-             --flash-attn on 
-             --keep 20000 --context-shift
-             -ctk q6_0 -ctv q5_1 --kv-unified 
-             --spec-draft-type-k turbo3
-             --spec-draft-type-v turbo3
-             --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
-             --spec-type draft-mtp,ngram-mod --spec-draft-n-max 3
-             --spec-draft-ctx-size 8192
-             --spec-ngram-mod-n-match 16
-             --spec-ngram-mod-n-min 8
-             --spec-ngram-mod-n-max 24
-             --vocab-patch /models/Qwen3.6-27B-IQ4_XS-unsloth.vocabPatch.gguf
+
+        # Qwen3.6-27B-IQ4XS-mixed-q3k-zacaj.gguf
+        # 65k q8/6 40-45tg  50-60% | 32tg 35-45%
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      --n-gpu-layers 99
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models2/Qwen3.6-27B-IQ4XS-mixed-q3k-zacaj.gguf --alias "Qwen3.6-35B-A3B"
+        #      --n-cpu-moe 0
+        #      --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      --ctx-size 65000
+        #      -b 2048 -ub 128
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on 
+        #      --keep 20000 --context-shift
+        #      -ctk q8_0 -ctv q6_0 --kv-unified 
+        #      --spec-draft-type-k turbo3
+        #      --spec-draft-type-v turbo3
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp,ngram-mod --spec-draft-n-max 2
+        #      --spec-draft-ctx-size 8192
+        #      --spec-ngram-mod-n-match 16
+        #      --spec-ngram-mod-n-min 8
+        #      --spec-ngram-mod-n-max 24
+        #      --vocab-patch /models/Qwen3.6-27B-IQ4_XS-unsloth.vocabPatch.gguf
+        #      --dry-multiplier 0.5 --dry-allowed-length 4 --dry-base 1.75 --dry-penalty-last-n 256
             #  -ot 'token_embd\.weight=CPU'
         # 27b - creative
         # 100k q5/q5 spec2-0.75 dry+xtx+freq 28tg 78% | 40-70% 18tg 686pe
@@ -458,6 +562,74 @@ services:
         #      --dry-multiplier 0.5 --dry-allowed-length 4 --dry-base 1.75 --dry-penalty-last-n 256
         #      --xtc-probability 0.5 --xtc-threshold 0.1
         #      --frequency-penalty 0.1 
+
+        # qwen 3.8-27b -- TEMPORARILY SWAPPED to Qwen3.6-35B-A3B IQ3_XXS below for the
+        # winpath-corruption model-comparison probe (see scripts/incident_replay_probe.py).
+        # Restore this block (uncomment, delete the qwen 3.6 block below) when done.
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      --n-gpu-layers 99
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models/Qwen3.8-27B-Opus-Distilled-UD-IQ3_XXS-rico03-zacaj.gguf
+        #      --vocab-patch /models/Qwen3.8-27B-Opus-Distilled-UD-IQ3_XXS-rico03-zacaj.vocabPatch.gguf
+        #      --alias "Qwen3.6-35B-A3B"
+        #      --n-cpu-moe 0
+        #      --temp 0.5 --top-p 0.9 --top-k 20 --min-p 0.2
+        #      --dynatemp-range 0 --dynatemp-exp 1
+        #      --chat-template-kwargs '{"reasoning_effort":"medium"}'
+        #      --ctx-size 90000
+        #      -b 2048 -ub 128
+        #      --mmproj /models/Qwen3.8-27B-unsloth.mmproj.gguf
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on
+        #      --keep 20000 --context-shift
+        #      -ctk q8_0 -ctv q6_0 --kv-unified
+        #      --spec-draft-type-k q5_0
+        #      --spec-draft-type-v turbo4
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 3
+        #      --spec-draft-ctx-size 16000
+        #      --spec-ngram-mod-n-match 16
+        #      --spec-ngram-mod-n-min 8
+        #      --spec-ngram-mod-n-max 24
+
+        # qwen 3.8-27b IQ4_XS -- VRAM-headroom test (silent WDDM CPU-paging hypothesis):
+        # much smaller ctx (only ~30K tokens needed for the replay) + no-mmap/direct-io to rule
+        # out mmap-driven page cache confusion, giving real headroom instead of the ~98%-pinned
+        # state from the earlier full-ctx run that decoded at ~3.76 t/s despite 100% GPU util.
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      --n-gpu-layers 99
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models2/Qwen3.8-27B-IQ4_XS.gguf --alias "Qwen3.6-35B-A3B"
+        #      --n-cpu-moe 0
+        #      --temp 0.8 --top-p 0.95 --top-k 20 --min-p 0.1
+        #      --chat-template-kwargs '{"reasoning_effort":"medium"}'
+        #      --vocab-patch /models/Qwen3.8-27B-UD-IQ3_XXS-unsloth.vocabPatch.gguf
+        #      --ctx-size 32000
+        #      --no-mmap -dio
+        #      -b 2048 -ub 128
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on
+        #      --keep 20000 --context-shift
+        #      -ctk q8_0 -ctv q6_0 --kv-unified
+        #      --spec-draft-type-k q5_0
+        #      --spec-draft-type-v turbo4
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 3
+        #      --spec-draft-ctx-size 4000
+        #      --spec-ngram-mod-n-min 8
+        #      --spec-ngram-mod-n-max 24
+        #      --spec-draft-type-k turbo4
+        #      --spec-draft-type-v turbo4
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 2
+        #      --spec-draft-ctx-size 8192
+            #  --chat-template-file /models/chat_template.jinja
 
         # Qwen3.5-9B-Q8_0-MTP-unsloth
         # 200k Q8 spec2 ng16 64tg 60%
@@ -1018,6 +1190,7 @@ services:
             - PROMPT_LOG_DIR=/logs/prompts
             - LOG_FILTERED=true
             - LOG_FULL_BODY=true
+            - LOG_RESPONSES=true
         depends_on:
             - llama-cpp
         restart: unless-stopped
