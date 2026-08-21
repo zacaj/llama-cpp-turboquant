@@ -118,6 +118,10 @@ purpose and usage. Update this list if you significantly change a script's inter
 - `imatrix-gen.sh`, `imatrix-combine.sh` — generate/merge importance matrices from a text corpus
   for a model; combine is token-count-weighted, not a naive average.
 - `perplexity-run.sh` — run `llama-perplexity` against a corpus, print final PPL.
+- `extract_session_corpus.py` — convert Claude Code `.jsonl` session logs into prompt-logger-shaped
+  JSON (plus `--text-dir` for plain-text renders). The jsonl is a uuid *tree*, not a log: resume
+  replays records verbatim and rewind forks history, so it dedupes by uuid and walks root-to-leaf,
+  emitting one segment per root. Do not size or select segments by `compactMetadata.preTokens` —
 - `corpus-holdout-slice.sh` — cut an untouched tail slice out of a corpus already consumed (by
   `--chunks N`) for imatrix generation, for a no-overlap PPL eval set.
 - `corpus-token-sample.sh` - cut a byte prefix from a corpus sized to land near a target token
