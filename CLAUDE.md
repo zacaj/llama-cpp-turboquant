@@ -127,10 +127,20 @@ purpose and usage. Update this list if you significantly change a script's inter
   gap should be ~0 at the earliest joined positions (where the shallow window still covers
   everything), which is a free per-run correctness check. Stats are clustered by segment, not
   token, since tokens within a session are correlated.
+- `tag_token_blocks.py` — label every token of a session segment with the block it came from
+  (`assistant/thinking`, `user/tool_result`, ...), so `merge_context_curve.py --kinds assistant/`
+  can restrict to tokens the model actually generates. This is not optional for interpreting a
+  curve: `tool_result` alone is ~56% of tokens and is the only kind with a *negative* context gain
+  below 57k, so it inverts the pooled mean. Input tokens are prefilled at inference and the model's
+  loss on them is never exercised, so they belong in the by-kind table as a control, not the
+  headline. Alignment is guarded twice (tokenizer pieces must reconstruct the text byte-for-byte,
+  and token ids must match the perplexity run's own); a segment failing either is skipped rather
+  than mislabeled.
 - `extract_session_corpus.py` — convert Claude Code `.jsonl` session logs into prompt-logger-shaped
   JSON (plus `--text-dir` for plain-text renders). The jsonl is a uuid *tree*, not a log: resume
   replays records verbatim and rewind forks history, so it dedupes by uuid and walks root-to-leaf,
   emitting one segment per root. Do not size or select segments by `compactMetadata.preTokens` —
+  measured against real token counts it ranges 0.34-11.62x.
 - `tokenize_prompt_logs.py` — real token counts for prompt-log JSON from either corpus (proxy logs
   or session segments), via `llama-tokenize` in the container. `prompt_chars` is a poor size proxy
   (chars/token ranges 1.41-4.01), so a char threshold cannot select "segments over 100k tokens".
@@ -177,7 +187,19 @@ purpose and usage. Update this list if you significantly change a script's inter
 - `extract_mtp_gguf.py` / `merge_mtp_gguf.py` — split out or merge in a model's MTP/draft head as
   its own GGUF.
 - `kld-run-pair.sh` / `kld-run-matrix.sh` / `kld-gen-reference.sh` — KL-divergence quality
-  comparison between quantizations/configs (pairwise or full matrix), against a reference.
+  comparison between quantizations/configs (pairwise or full matrix), against a reference. The
+  matrix report table includes same-top-p and 99.9% KLD alongside mean KLD -- mean KLD is a
+  stable statistic but is a poor detector of rare single-token argmax flips (e.g. one corrupted
+  byte in a file path out of 10k tokens barely moves a corpus-wide mean); same-top-p is the
+  direct flip-rate for that failure mode.
+- `build_winpath_corpus.py` — generate synthetic Windows-path-heavy text (agent-transcript-shaped:
+  tool-call JSON blocks, prose, directory listings) for corpus eval. Default wikitext/prose
+  corpora are forward-slash text and never exercise backslash-escape-collision positions (`\t`,
+  `\r`, `\n`, `\b`, `\f` as path separator + first letter of a name, not the string escape they
+  spell everywhere else) -- a real corruption of this kind was observed and traced to a rare
+  sampled token at exactly one of those positions (see `data/logs/prompts/20260817_194601_451084
+  .json`). `data/corpus/winpath/wiki-plus-winpath.raw` blends this with wikitext-2 for KLD/PPL
+  sweeps that need both normal-prose coverage and this failure mode's coverage.
 - `compare-llama-bench.py` / `bench-models.sh` / `bench-smem-m5.sh` — perf comparison/benchmarking
   harnesses.
 - `bench-filter.py` / `bench-filter.sh` — filter bench-results.tsv by regex on any column,
