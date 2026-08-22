@@ -501,10 +501,16 @@ struct server_slot {
     int64_t t_start_process_prompt;
     int64_t t_start_generation;
     int64_t t_print_last = 0;
-    int32_t n_decoded_last = 0;
 
     double t_prompt_processing = 0.0; // ms
     double t_token_generation = 0.0;  // ms
+
+    // snapshot of the counters below, taken at the last periodic print_timings_tg() call,
+    // so that call can report a "current" (since-last-print) rate alongside the cumulative one
+    int32_t n_decoded_last          = 0;
+    double  t_token_generation_last = 0.0; // ms
+    int32_t n_draft_total_last      = 0;
+    int32_t n_draft_accepted_last   = 0;
 
     std::function<void(int /* id_slot */)> callback_on_release;
 
@@ -544,6 +550,11 @@ struct server_slot {
         n_draft_accepted = 0;
         n_draft_verif_steps = 0;
         n_accepted_per_pos.clear();
+
+        n_decoded_last          = 0;
+        t_token_generation_last = 0.0;
+        n_draft_total_last      = 0;
+        n_draft_accepted_last   = 0;
 
         task_prev = std::move(task);
         task.reset();
@@ -797,15 +808,34 @@ struct server_slot {
         const double n_gen_second_win = 1e6 / (t_now - t_print_last) * (n_decoded - n_decoded_last);
 
         t_print_last = t_now;
-        n_decoded_last = n_decoded;
+
+        // windowed since the last periodic print, so a recent slowdown/acceptance-drop
+        // isn't hidden behind the long-run cumulative average above
+        const int32_t n_decoded_cur          = n_decoded - n_decoded_last;
+        const double  t_token_generation_cur = t_token_generation - t_token_generation_last;
+        const double  n_gen_second_cur       = n_decoded_cur > 0 ? 1e3 / t_token_generation_cur * n_decoded_cur : 0.0;
 
         if (n_draft_total > 0) {
             const float draft_ratio = (float) n_draft_accepted / n_draft_total;
-            SLT_INF(*this, "n_decoded = %6d, tg = %6.2f t/s, tg_3s = %6.2f t/s, draft accept = %0.3f (%d/%d)\n",
-                    n_decoded, n_gen_second, n_gen_second_win, draft_ratio, n_draft_accepted, n_draft_total);
+
+            const int32_t n_draft_total_cur    = n_draft_total    - n_draft_total_last;
+            const int32_t n_draft_accepted_cur = n_draft_accepted - n_draft_accepted_last;
+            const float draft_ratio_cur = n_draft_total_cur > 0 ? (float) n_draft_accepted_cur / n_draft_total_cur : 0.0f;
+
+            SLT_INF(*this, "n_decoded = %6d, tg = %6.2f t/s, tg_3s = %6.2f t/s (cur %6.2f t/s), draft accept = %0.3f (%d/%d) (cur %0.3f (%d/%d))\n",
+                    n_decoded, n_gen_second, n_gen_second_win, n_gen_second_cur,
+                    draft_ratio, n_draft_accepted, n_draft_total,
+                    draft_ratio_cur, n_draft_accepted_cur, n_draft_total_cur);
+
+            n_draft_total_last    = n_draft_total;
+            n_draft_accepted_last = n_draft_accepted;
         } else {
-            SLT_INF(*this, "n_decoded = %6d, tg = %6.2f t/s, tg_3s = %6.2f t/s\n", n_decoded, n_gen_second, n_gen_second_win);
+            SLT_INF(*this, "n_decoded = %6d, tg = %6.2f t/s, tg_3s = %6.2f t/s (cur %6.2f t/s)\n",
+                    n_decoded, n_gen_second, n_gen_second_win, n_gen_second_cur);
         }
+
+        n_decoded_last          = n_decoded;
+        t_token_generation_last = t_token_generation;
     }
 
     void print_timings_pp() const {
@@ -862,6 +892,14 @@ struct server_slot {
                     draft_ratio, n_draft_accepted, n_draft_total, mean_acc_len);
             SLT_TRC(*this,
                     "     acc per pos = (%s)\n", acceptance_rates_per_pos.c_str());
+
+            // ctx_tgt's batched-decode stats since generation start = verify-round cost only
+            // (real prompt eval already happened before the llama_perf_context_reset above)
+            const auto perf_tgt = llama_perf_context(ctx_tgt);
+            SLT_INF(*this,
+                    "verify decode   = %10.2f ms / %5d tokens (%8.2f ms per token)\n",
+                    perf_tgt.t_p_eval_ms, perf_tgt.n_p_eval,
+                    perf_tgt.t_p_eval_ms / std::max(1, perf_tgt.n_p_eval));
         }
 
         common_speculative_print_stats(spec);
@@ -4423,6 +4461,11 @@ private:
                 slot.n_decoded_last = 0;
                 slot.t_prompt_processing = (slot.t_start_generation - slot.t_start_process_prompt) / 1e3;
                 metrics.on_prompt_eval(slot);
+
+                // isolate ctx_tgt's batched-decode stats to verify-only rounds (excludes the
+                // real prompt-eval pass that already happened before this point), so that
+                // dividing t_p_eval_ms by the MTP/draft round count approximates per-verify-pass cost
+                llama_perf_context_reset(slot.ctx_tgt);
             }
 
             slot.t_token_generation = std::max<int64_t>(1, t_now - slot.t_start_generation) / 1e3;
