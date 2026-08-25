@@ -441,7 +441,7 @@ extern "C" {
         GGML_TYPE_Q6_0    = 51, // beellama-style Q6 KV cache: legacy block-32 quant (ggml_half d + 2-bit qh + 4-bit qs)
         // Prism-private Q2_0 at group size 128 (upstream Q2_0 is group 64). High id so it
         // slots above upstream types; type_traits is sized to COUNT (143) with 52..141 unused.
-        GGML_TYPE_Q2_0_G128 = 142,
+        GGML_TYPE_PQ2_0 = 142,
         GGML_TYPE_COUNT   = 143,
     };
 
@@ -490,7 +490,7 @@ extern "C" {
         GGML_FTYPE_MOSTLY_Q8_CR   = 29, // except 1d tensors
         GGML_FTYPE_MOSTLY_Q5_CR   = 30, // except 1d tensors
         GGML_FTYPE_MOSTLY_Q6_CR   = 31, // except 1d tensors
-        GGML_FTYPE_MOSTLY_Q2_0_G128 = 128, // except 1d tensors (Prism-private group-128 Q2_0)
+        GGML_FTYPE_MOSTLY_PQ2_0 = 128, // except 1d tensors (Prism-private group-128 Q2_0)
     };
 
     // available tensor operations:
