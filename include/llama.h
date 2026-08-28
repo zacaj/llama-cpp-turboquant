@@ -162,6 +162,7 @@ extern "C" {
         LLAMA_FTYPE_MOSTLY_Q5_CR         = 45, // except 1d tensors
         LLAMA_FTYPE_MOSTLY_Q6_CR         = 46, // except 1d tensors
         LLAMA_FTYPE_MOSTLY_PQ2_0     = 141, // except 1d tensors (Prism group-128 Q2_0; matches published PQ2_0 ggufs)
+        LLAMA_FTYPE_MOSTLY_PQ2_0_LEGACY = 142, // pre-rename value for the same format, still found in published ggufs
 
         LLAMA_FTYPE_GUESSED = 1024, // not specified in the model file
     };
