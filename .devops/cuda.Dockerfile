@@ -47,7 +47,11 @@ COPY . .
 
 COPY --from=web /app/tools/ui/dist tools/ui/dist
 
-RUN --mount=type=bind,source=.buildcache,target=/app/build,rw \
+# Persistent build dir: a cache mount is the only mount type BuildKit keeps across builds
+# (bind mounts are context snapshots -- writes go to a throwaway overlay). `id` pins it so the
+# next build reuses the same CMake cache and object files; `sharing=locked` serializes concurrent
+# builds rather than letting them corrupt each other's build tree.
+RUN --mount=type=cache,target=/app/build,id=llama-turbo-build,sharing=locked \
     if [ "${CUDA_DOCKER_ARCH}" != "default" ]; then \
     export CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${CUDA_DOCKER_ARCH}"; \
     fi && \
@@ -62,7 +66,8 @@ RUN --mount=type=bind,source=.buildcache,target=/app/build,rw \
     mkdir -p /app/lib && \
     find build -name "*.so*" -exec cp -P {} /app/lib \;
 
-RUN --mount=type=bind,source=.buildcache,target=/app/build,rw \
+# Same id as above -- nothing under build/ exists in the image layer, only in the cache mount.
+RUN --mount=type=cache,target=/app/build,id=llama-turbo-build,sharing=locked \
     mkdir -p /app/full \
     && cp build/bin/* /app/full \
     && find /app/full -name "*.so*" -delete \

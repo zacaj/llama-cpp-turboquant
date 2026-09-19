@@ -19,6 +19,10 @@ services:
                           count: all
                           capabilities:
                               - gpu
+        ipc: host
+        restart: unless-stopped
+        gpus: all
+        runtime: nvidia
         # direct access, bypassing prompt-logger/prompt-router proxies (web UI + API):
         ports:
             - 8080:8080
@@ -26,12 +30,9 @@ services:
             - /mnt/llm/llama.cpp/models:/models
             - /mnt/2508/Backup 2:/models2
             - /mnt/2508/Archive:/models3
+            - /mnt/2508/Backup:/models4
             - ./data/logs:/logs
             - ./data/cache:/cache
-        ipc: host
-        restart: unless-stopped
-        gpus: all
-        runtime: nvidia
         environment:
             - TURBO_AUTO_ASYMMETRIC=0
             - GGML_TQ_NATIVE=1
@@ -199,12 +200,12 @@ services:
              -lv 4 --log-timestamps --log-colors on
              --checkpoint-min-step 4000 --ctx-checkpoints 32
              --cache-prompt --cache-ram -1
-             -m /models2/Agents-A1-unsloth-UD-IQ3_XXS-MTP-zacaj.gguf --alias "Qwen3.6-35B-A3B"
+             -m /models2/Darwin-35B-A3B-Opus-unsloth-UD-IQ3_XXS-MTP-zacaj.gguf --alias "Qwen3.6-35B-A3B"
              --n-gpu-layers 99
              --n-cpu-moe 0
-             --ctx-size 60000
+             --ctx-size 120000
              --keep 20000 --context-shift
-             --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
+             --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
              -b 2048 -ub 512
              --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
              --flash-attn on
@@ -213,7 +214,523 @@ services:
              --spec-draft-type-v turbo4
              --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
              --spec-type draft-mtp --spec-draft-n-max 2
-             --spec-draft-ctx-size 8192
+             --spec-draft-ctx-size 8192 >
+
+        #  A3B Q4
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja --chat-template-file /models/chat_template.jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models4/Darwin-35B-A3B-Opus-Q4_K_XL-MTP-zacaj.gguf --alias "Qwen3.6-35B-A3B"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 19
+        #      --ctx-size 120000
+        #      --keep 20000 --context-shift
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 1024
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q6_0 --kv-unified
+        #      --spec-draft-type-k turbo4
+        #      --spec-draft-type-v turbo4
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 2
+        #      --spec-draft-ctx-size 8192
+
+        # todo.md 8/25 spread-check-full (5/5, done): satellite/poker/dot-dsl vs Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-unsloth (Base Q4_K_XL) -- 3/3
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models2/Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-unsloth.gguf --alias "Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-Base"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+        #      --spec-draft-type-k q8_0
+        #      --spec-draft-type-v q8_0
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 2
+
+        # todo.md 9/4 (aborted -- ~5 tok/s, 8x slower than your own bench-results.tsv reference for
+        # this model, because the plain unsloth build has no MTP head; your fast benchmarks all
+        # used the custom -zacaj MTP-equipped builds instead): shortlist7 vs Qwen3.6-27B-IQ4_XS-unsloth
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models2/Qwen3.6-27B-IQ4_XS-unsloth.gguf --vocab-patch /models2/Qwen3.6-27B-IQ4_XS-unsloth.vocabPatch.gguf --alias "Qwen3.6-27B-IQ4_XS-unsloth"
+        #      --n-gpu-layers 99
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 9/4 (done): shortlist7 vs Qwen3.6-27B-IQ4_XS-uniform-imat-zacaj + vocab patch --
+        # killed early, triangle/grade-school already failed on excessive verbosity (see todo.md)
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models2/Qwen3.6-27B-IQ4_XS-uniform-imat-zacaj.gguf --vocab-patch /models2/Qwen3.6-27B-IQ4_XS-unsloth.vocabPatch.gguf --alias "Qwen3.6-27B-IQ4_XS-uniform-imat-zacaj"
+        #      --n-gpu-layers 99
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+        #      --spec-draft-type-k q8_0
+        #      --spec-draft-type-v q8_0
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 2
+
+        # todo.md 9/5 (done): shortlist7 vs Qwen3.8-27B-IQ3_XXS-GSQ-RCO-MTP-ISTA_DASLab -- 4/9 raw,
+        # 6/9 real (2 of the 4 "failures" were correct code killed by the clock, confirmed by
+        # running the tests directly against what was on disk)
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models3/Qwen3.8-27B-IQ3_XXS-GSQ-RCO-MTP-ISNTA_DASLab.gguf --alias "Qwen3.8-27B-IQ3_XXS-GSQ-RCO-MTP-ISTA_DASLab"
+        #      --n-gpu-layers 99
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+        #      --spec-draft-type-k q8_0
+        #      --spec-draft-type-v q8_0
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 2
+
+        # todo.md 9/5 (done): retry item 1 (Qwen3.8-27B-UD-IQ3_XXS-unsloth + vocab patch) -- final
+        # genuine tally 2/9 (bowling, book-store pass; 6 genuine fails; two-bucket unresolved
+        # infra issue) after 4 retry passes with MAX_DUR_SCALE=2.5, see todo.md
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models/Qwen3.8-27B-UD-IQ3_XXS-unsloth.gguf --vocab-patch /models/Qwen3.8-27B-UD-IQ3_XXS-unsloth.vocabPatch.gguf --alias "Qwen3.8-27B-UD-IQ3_XXS-unsloth"
+        #      --n-gpu-layers 99
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 9/6 (done): retry item 2 (Qwen3.6-27B-UD-IQ3_XXS-MTP-unsloth + vocab patch) --
+        # final genuine tally 2/9 (book-store, grade-school pass), see todo.md
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models2/Qwen3.6-27B-UD-IQ3_XXS-MTP-unsloth.gguf --vocab-patch /models2/Qwen3.6-27B-UD-IQ3_XXS-MTP-unsloth.vocabPatch.gguf --alias "Qwen3.6-27B-UD-IQ3_XXS-MTP-unsloth"
+        #      --n-gpu-layers 99
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+        #      --spec-draft-type-k q8_0
+        #      --spec-draft-type-v q8_0
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 2
+
+        # todo.md 9/6 (done): retried the 4 bailed exercises for the XXS ISTA-DASLab quant with
+        # MAX_DUR_SCALE -- final genuine tally 7/9, see todo.md
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models3/Qwen3.8-27B-IQ3_XXS-GSQ-RCO-MTP-ISNTA_DASLab.gguf --alias "Qwen3.8-27B-IQ3_XXS-GSQ-RCO-MTP-ISTA_DASLab"
+        #      --n-gpu-layers 99
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+        #      --spec-draft-type-k q8_0
+        #      --spec-draft-type-v q8_0
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 2
+
+        # todo.md 9/6: try the larger IQ3_S GSQ-RCO quant (12.1G vs XXS's 10.4G) on grade-school
+        # and paasio -- the 2 exercises the XXS version still failed even after the scaled-timeout
+        # retry
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models3/Qwen3.8-27B-IQ3_S-GSQ-RCO-MTP-ISNTA_DASLab.gguf --alias "Qwen3.8-27B-IQ3_S-GSQ-RCO-MTP-ISTA_DASLab"
+        #      --n-gpu-layers 99
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+        #      --spec-draft-type-k q8_0
+        #      --spec-draft-type-v q8_0
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 2
+
+        # todo.md item 1 (done): shortlist7 vs Qwen3.8-27B-UD-IQ3_XXS-unsloth + vocab patch
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models/Qwen3.8-27B-UD-IQ3_XXS-unsloth.gguf --vocab-patch /models/Qwen3.8-27B-UD-IQ3_XXS-unsloth.vocabPatch.gguf --alias "Qwen3.8-27B-UD-IQ3_XXS-unsloth"
+        #      --n-gpu-layers 99
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md item 2 (done): shortlist7 vs Qwen3.6-27B-UD-IQ3_XXS-MTP-unsloth + vocab patch
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models2/Qwen3.6-27B-UD-IQ3_XXS-MTP-unsloth.gguf --vocab-patch /models2/Qwen3.6-27B-UD-IQ3_XXS-MTP-unsloth.vocabPatch.gguf --alias "Qwen3.6-27B-UD-IQ3_XXS-MTP-unsloth"
+        #      --n-gpu-layers 99
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md item 4 (done): shortlist7 vs Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-Q4_K_XL-MTP-mudler-zacaj
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models4/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-Q4_K_XL-MTP-mudler-zacaj.gguf --alias "Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-Q4_K_XL-MTP-mudler"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md item 7: shortlist7 vs Darwin-35B-A3B-Opus-Q8_0-plain -- BLOCKED, see todo.md
+        # (35G file > 31G total system RAM, thrashed on load, backed off before it crashed)
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models2/Darwin-35B-A3B-Opus-Q8_0-plain.gguf --alias "Darwin-35B-A3B-Opus-Q8_0-plain"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md item 6 (1/5, done): paasio/clock/bowling vs Ornith-1.0-35B-unsloth-UD-IQ3_XXS-MTP-zacaj
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models/Ornith-1.0-35B-unsloth-UD-IQ3_XXS-MTP-zacaj.gguf --alias "Ornith-1.0-35B-unsloth-UD-IQ3_XXS-MTP-zacaj"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md item 6 (2/5, done): paasio/clock/bowling vs Qwen3.6-35B-A3B-UD-IQ3_XXS-MTP (Base IQ3_XXS)
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models3/Qwen3.6-35B-A3B-UD-IQ3_XXS-MTP.gguf --alias "Qwen3.6-35B-A3B-UD-IQ3_XXS-MTP-Base"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md item 6 (3/5, done): paasio/clock/bowling vs Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-unsloth (Base Q4_K_XL)
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models2/Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-unsloth.gguf --alias "Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-Base"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md item 6 (4/5, done): paasio/clock/bowling vs Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-UD-IQ4_XS-MTP-mudler
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models3/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-UD-IQ4_XS-MTP-mudler.gguf --alias "Qwen3.6-35B-A3B-4.7-Reasoning-Distilled-IQ4_XS-mudler"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md item 6 (5/5, done): paasio/clock/bowling vs Darwin-35B-A3B-Opus-unsloth-UD-IQ3_XXS-MTP-zacaj
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models2/Darwin-35B-A3B-Opus-unsloth-UD-IQ3_XXS-MTP-zacaj.gguf --alias "Darwin-35B-A3B-Opus-unsloth-UD-IQ3_XXS-MTP-zacaj"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md item 5 (done): shortlist7 vs Darwin-35B-A3B-Opus-Q4_K_XL-MTP-zacaj (newly built)
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models4/Darwin-35B-A3B-Opus-Q4_K_XL-MTP-zacaj.gguf --alias "Darwin-35B-A3B-Opus-Q4_K_XL-MTP-zacaj"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md item 3 (done): shortlist7 vs Kimi-K2.6-Reasoning-Distilled-IQ3_XXS-MTP-zacaj (newly built)
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models4/Qwen3.6-35B-A3B-Kimi-K2.6-Reasoning-Distilled-IQ3_XXS-MTP-zacaj.gguf --alias "Kimi-K2.6-Reasoning-Distilled-IQ3_XXS-MTP-zacaj"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md item 7 (done): shortlist7 vs Darwin-35B-A3B-Opus-Q8_0-plain -- 7/9 passed
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models2/Darwin-35B-A3B-Opus-Q8_0-plain.gguf --alias "Darwin-35B-A3B-Opus-Q8_0-plain"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 backfill (1/9, done): clock vs Darwin-35B-A3B-Opus-Q4_K_XL-MTP-zacaj -- now 9/9
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models4/Darwin-35B-A3B-Opus-Q4_K_XL-MTP-zacaj.gguf --alias "Darwin-35B-A3B-Opus-Q4_K_XL-MTP-zacaj"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 backfill (2/9, done): spiral-matrix/paasio/bowling vs Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-UD-IQ4_XS-MTP-mudler -- spiral-matrix+bowling now pass, paasio still fails
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models3/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-UD-IQ4_XS-MTP-mudler.gguf --alias "Qwen3.6-35B-A3B-4.7-Reasoning-Distilled-IQ4_XS-mudler"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 backfill (3/9, done): paasio/bowling vs Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS (main) -- paasio now passes, bowling fails
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models/Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.gguf --alias "Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 backfill (4/9, done): clock/bowling vs Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-Q4_K_XL-MTP-mudler-zacaj -- clock now passes, bowling still fails
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models4/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-Q4_K_XL-MTP-mudler-zacaj.gguf --alias "Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-Q4_K_XL-MTP-mudler"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 backfill (5/9, done): spiral-matrix/paasio/bowling vs Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.pruned-summary.weighted-n48 -- 0/3 passed
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models3/Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.pruned-summary.weighted-n48.gguf --alias "Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.pruned-summary.weighted-n48"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 backfill (6/9, done): spiral-matrix/paasio vs Qwen3.6-35B-A3B-UD-IQ4_XS-MTP-unsloth (Base IQ4_XS) -- spiral-matrix now passes, paasio fails
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models2/Qwen3.6-35B-A3B-UD-IQ4_XS-MTP-unsloth.gguf --alias "Qwen3.6-35B-A3B-UD-IQ4_XS-MTP-Base"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 backfill (7/9, done): paasio vs Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-unsloth (Base Q4_K_XL) -- still fails, no change
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models2/Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-unsloth.gguf --alias "Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-Base"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 backfill (8/9, done): spiral-matrix/paasio/bowling vs Qwen3.6-35B-A3B-UD-IQ3_XXS-MTP (Base IQ3_XXS) -- spiral-matrix now passes, rest still fail
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      -m /models3/Qwen3.6-35B-A3B-UD-IQ3_XXS-MTP.gguf --alias "Qwen3.6-35B-A3B-UD-IQ3_XXS-MTP-Base"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 backfill (9/9, done): clock/paasio/bowling vs Kimi-K2.6-Reasoning-Distilled-IQ3_XXS-MTP-zacaj -- clock now passes, rest still fail
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models4/Qwen3.6-35B-A3B-Kimi-K2.6-Reasoning-Distilled-IQ3_XXS-MTP-zacaj.gguf --alias "Kimi-K2.6-Reasoning-Distilled-IQ3_XXS-MTP-zacaj"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 spread-check (1/3, done -- REDONE with corrected max_dur=1200): satellite/poker/dot-dsl vs Darwin-35B-A3B-Opus-Q4_K_XL-MTP-zacaj -- now 0/3 (satellite's earlier "pass" was a try-7 fluke from the parsing bug letting it exceed the intended 6-try cap)
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models4/Darwin-35B-A3B-Opus-Q4_K_XL-MTP-zacaj.gguf --alias "Darwin-35B-A3B-Opus-Q4_K_XL-MTP-zacaj"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 spread-check (2/3, done -- REDONE with corrected max_dur=1200): satellite/poker/dot-dsl vs Ornith-1.0-35B-unsloth-UD-IQ3_XXS-MTP-zacaj -- unchanged, still 2/3 (never needed the extra budget)
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models/Ornith-1.0-35B-unsloth-UD-IQ3_XXS-MTP-zacaj.gguf --alias "Ornith-1.0-35B-unsloth-UD-IQ3_XXS-MTP-zacaj"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 spread-check (3/3, REDO -- prior run used max_dur=480 not 1200 due to the
+        # run.sh fromfile IFS-tab parsing bug, see todo.md): satellite/poker/dot-dsl vs Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS (main)
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models/Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.gguf --alias "Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
         # qwen 35 creative
         # command: >
         #      --server --host 0.0.0.0 --port 8080 --jinja --chat-template-file /models/chat_template.jinja
@@ -563,9 +1080,7 @@ services:
         #      --xtc-probability 0.5 --xtc-threshold 0.1
         #      --frequency-penalty 0.1 
 
-        # qwen 3.8-27b -- TEMPORARILY SWAPPED to Qwen3.6-35B-A3B IQ3_XXS below for the
-        # winpath-corruption model-comparison probe (see scripts/incident_replay_probe.py).
-        # Restore this block (uncomment, delete the qwen 3.6 block below) when done.
+        # qwen 3.8-27b -
         # command: >
         #      --server --host 0.0.0.0 --port 8080 --jinja
         #      --n-gpu-layers 99
@@ -640,24 +1155,112 @@ services:
         #      -lv 4 --log-timestamps --log-colors on
         #      --checkpoint-min-step 4000 --ctx-checkpoints 32
         #      --cache-prompt --cache-ram -1
-        #      -m /models/Qwen3.5-9B-Q8_0-MTP-unsloth.gguf --alias "Qwen3.6-35B-A3B"  
+        #      -m /models2/Qwen3.5-9B-Q8_0-MTP-unsloth.gguf --alias "Qwen3.6-35B-A3B"
         #      --n-cpu-moe 0
         #      --temp 0.7 --top-p 0.95 --top-k 20 --min-p 0.01
-        #      --ctx-size 200000 
-        #      -b 2048 -ub 128
+        #      --ctx-size 100000
+        #      -b 2048 -ub 512
         #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
-        #      --flash-attn on 
+        #      --flash-attn on
         #      --keep 20000 --context-shift
-        #      -ctk q8_0 -ctv q8_0 --kv-unified 
+        #      -ctk q8_0 -ctv q8_0 --kv-unified
         #      --spec-draft-type-k q8_0
         #      --spec-draft-type-v q8_0
         #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
         #      --spec-type draft-mtp,ngram-mod --spec-draft-n-max 4
-        #      --spec-draft-ctx-size 8192
+        #      --spec-draft-ctx-size 16000
         #      --spec-ngram-mod-n-match 16
         #      --spec-ngram-mod-n-min 8
         #      --spec-ngram-mod-n-max 24
-        #      --spec-draft-p-min 0.75
+        #      --mmproj /models2/Qwen3.5-9B-F32-unsloth.mmproj.gguf
+
+        # todo.md 8/25 spread-check-full (1/5, done): satellite/poker/dot-dsl vs Qwen3.6-35B-A3B-UD-IQ3_XXS-MTP (Base IQ3_XXS) -- 3/3
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models3/Qwen3.6-35B-A3B-UD-IQ3_XXS-MTP.gguf --alias "Qwen3.6-35B-A3B-UD-IQ3_XXS-MTP-Base"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 spread-check-full (2/5, done): satellite/poker/dot-dsl vs Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.pruned-summary.weighted-n48 -- 0/3, consistent with this model's already-weakest 3/9 shortlist-7 standing
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models3/Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.pruned-summary.weighted-n48.gguf --alias "Qwen3.6-35B-A3B-Claude-Opus-Distilled-MTP-UD-IQ3_XXS.pruned-summary.weighted-n48"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+
+        # todo.md 8/25 spread-check-full (3/5, done): satellite/poker/dot-dsl vs Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-UD-IQ4_XS-MTP-mudler -- 3/3, MTP loaded cleanly
+        # (fit-ctx bumped 32768->50000 at some point after this run completed, presumably your own
+        # testing -- left as found)
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models3/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-UD-IQ4_XS-MTP-mudler.gguf --alias "Qwen3.6-35B-A3B-4.7-Reasoning-Distilled-IQ4_XS-mudler"
+        #      --fit-ctx 50000
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+        #      --spec-draft-type-k q8_0
+        #      --spec-draft-type-v q8_0
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 2
+
+        # todo.md 8/25 spread-check-full (4/5, done): satellite/poker/dot-dsl vs Qwen3.6-35B-A3B-UD-IQ4_XS-MTP-unsloth (Base IQ4_XS) -- 3/3
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models2/Qwen3.6-35B-A3B-UD-IQ4_XS-MTP-unsloth.gguf --alias "Qwen3.6-35B-A3B-UD-IQ4_XS-MTP-Base"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+        #      --spec-draft-type-k q8_0
+        #      --spec-draft-type-v q8_0
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 2
+
+        # todo.md 8/25 spread-check-full (5/5): satellite/poker/dot-dsl vs Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-unsloth (Base Q4_K_XL)
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --cache-prompt
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      -m /models2/Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-unsloth.gguf --alias "Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP-Base"
+        #      --fit-ctx 32768
+        #      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.01
+        #      -b 2048 -ub 512
+        #      --parallel 1
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q8_0
+        #      --spec-draft-type-k q8_0
+        #      --spec-draft-type-v q8_0
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 2
 
         # Qwen3.5-9B
         # command: >
@@ -826,6 +1429,28 @@ services:
         #      --spec-draft-ctx-size 4096
         #      --spec-draft-type-k turbo2
         #      --spec-draft-type-v turbo2
+
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja 
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models3/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL-unsloth.gguf --alias "Qwen3.6-35B-A3B"
+        #      --n-gpu-layers 99
+        #      --n-cpu-moe 0
+        #      --ctx-size 60000
+        #      --keep 20000 --context-shift
+        #      --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.1
+        #      -b 2048 -ub 512
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on
+        #      -ctk q8_0 -ctv q6_0 --kv-unified
+        #      --spec-draft-type-k turbo4
+        #      --spec-draft-type-v turbo4
+        #      --spec-draft-model /models/mtp-gemma-4-26B-A4B-it-Q4_0.gguf
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 2
+        #      --spec-draft-ctx-size 8192
 
         # mistral
         # eagle   X
@@ -1019,6 +1644,35 @@ services:
         #     --spec-ngram-mod-n-match 24
         #     --spec-ngram-mod-n-min 8
         #     --spec-ngram-mod-n-max 24
+
+
+        # command: >
+        #      --server --host 0.0.0.0 --port 8080 --jinja
+        #      --n-gpu-layers 99
+        #      -lv 4 --log-timestamps --log-colors on
+        #      --checkpoint-min-step 4000 --ctx-checkpoints 32
+        #      --cache-prompt --cache-ram -1
+        #      -m /models/Gemma4-12B-fable5-composer-uncensored-llmfan46.gguf
+        #      --alias "Qwen3.6-35B-A3B"
+        #      --n-cpu-moe 0
+        #      --temp 0.8 --top-p 0.95 --top-k 2440 --min-p 0.1
+        #      --dynatemp-range 0 --dynatemp-exp 1
+        #      --ctx-size 100000
+        #      -b 2048 -ub 512
+        #      --mmproj /models/Gemma4-12B-fable5-composer-uncensored-llmfan46.mmproj.gguf
+        #      --parallel 1 --cache-idle-slots --slot-save-path /cache/slots/
+        #      --flash-attn on
+        #      --keep 20000 --context-shift
+        #      -ctk q8_0 -ctv q6_0 --kv-unified
+        #      --spec-draft-model /models/Gemma4-12B-fable5-composer-yuxinlu1.mtp.gguf
+        #      --spec-draft-type-k q5_0
+        #      --spec-draft-type-v turbo4
+        #      --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
+        #      --spec-type draft-mtp --spec-draft-n-max 3
+        #      --spec-draft-ctx-size 16000
+        #      --spec-ngram-mod-n-match 16
+        #      --spec-ngram-mod-n-min 8
+        #      --spec-ngram-mod-n-max 24
 
         # ── GLM-4.7-Flash Q3_K_XL — local, 16 GB VRAM ────────────────────────
         # 30B.A3B MoE + Gated Delta Net hybrid; MLA → V=0, only K latent cached
