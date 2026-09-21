@@ -392,15 +392,7 @@ static ggml_type tensor_type_fallback(quantize_state_impl & qs, const ggml_tenso
     ggml_type return_type = target_type;
 
     const int64_t ncols = t->ne[0];
-    int64_t qk_k = ggml_blck_size(target_type);
-
-    // PQ2_0 weights are stored in 128-wide blocks, but the CPU vec_dot consumes Q8_K
-    // activations, which are allocated and quantized in 256-element blocks. A row that is
-    // only a multiple of 128 would size the activation row to zero bytes
-    // (ggml_row_size rounds down), so the shape must satisfy the activation granularity.
-    if (target_type == GGML_TYPE_PQ2_0) {
-        qk_k = ggml_blck_size(GGML_TYPE_Q8_K);
-    }
+    const int64_t qk_k = ggml_blck_size(target_type);
 
     // CR types rotate activations in groups of 256 at runtime.
     static constexpr int64_t q8_cr_group_size = 256;
