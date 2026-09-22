@@ -214,7 +214,7 @@ services:
              --spec-draft-type-v turbo4
              --spec-draft-ngl 99 --spec-draft-n-cpu-moe 0
              --spec-type draft-mtp --spec-draft-n-max 2
-             --spec-draft-ctx-size 8192 >
+             --spec-draft-ctx-size 8192 
 
         #  A3B Q4
         # command: >

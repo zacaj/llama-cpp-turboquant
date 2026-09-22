@@ -3585,10 +3585,6 @@ private:
                 return;
             }
 
-            if (has_checkpoint_restored_prompt) {
-                continue;
-            }
-
             // check if we can batch this slot with the previous one
             if (!slot_batched) {
                 slot_batched = &slot;
@@ -4026,10 +4022,6 @@ private:
                         }
                     } // end of SLOT_STATE_STARTED
 
-                    if (slot.prompt_checkpoint_restored && n_tokens_prev > 0) {
-                        continue;
-                    }
-
                     if (!slot.can_split()) {
                         // cannot fit the prompt in the current batch - will try next iter
                         if (batch.size() + slot.task->n_tokens() > n_batch) {
@@ -4244,7 +4236,7 @@ private:
                     }
 
                     if (slot.prompt_checkpoint_restored || (!slot.prompt.checkpoints.empty() && near_prompt_end)) {
-                        break;
+                        add_ok = false; // isolate this slot's batch: skip remaining slots this pass
                     }
                 }
 

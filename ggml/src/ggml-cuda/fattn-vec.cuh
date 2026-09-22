@@ -118,7 +118,11 @@ static __global__ void flash_attn_ext_vec(
     // reducing loop overhead and improving ILP in the V aggregation phase.
     // Eighth nthreads_V for turbo: V_cols_per_iter goes from 4→8, processing 8 V positions
     // per outer loop iteration. Halves outer loop count again, more ILP from concurrent V rows.
-    constexpr int nthreads_V  = V_is_unquantized ? (V_is_turbo ? (nthreads_V_q / 8 < 1 ? 1 : nthreads_V_q / 8) : 128 / cpy_nb) : nthreads_V_q;
+    // At D=512 the eighth-divisor blows the 48KB static shared-memory budget (KQ/combine
+    // buffer scales with V_cols_per_iter*D): quarter instead, still fits (~32KB) and only
+    // gives up half the ILP win, only at this one D.
+    constexpr int turbo_V_divisor = D >= 512 ? 4 : 8;
+    constexpr int nthreads_V  = V_is_unquantized ? (V_is_turbo ? (nthreads_V_q / turbo_V_divisor < 1 ? 1 : nthreads_V_q / turbo_V_divisor) : 128 / cpy_nb) : nthreads_V_q;
 
     static_assert(WARP_SIZE % nthreads_KQ == 0, "bad nthreads_K");
     static_assert(WARP_SIZE % nthreads_V  == 0, "bad nthreads_V");
