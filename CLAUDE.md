@@ -237,3 +237,23 @@ purpose and usage. Update this list if you significantly change a script's inter
 - `docs/test-plan-kv-cache-lru.md`, `docs/speculative.md`, `docs/autoparser.md` — fork-authored
   design/test docs worth reading before modifying the corresponding subsystem; not just API
   reference like the rest of `docs/`.
+- **`PQ2_0`/`PTQ1_0` ternary types + Hadamard weight-fold runtime** — cherry-picked from
+  `PrismML-Eng/llama.cpp` (`prism` branch), CUDA + CPU only; see README "Ternary quant types"
+  section for the full type-ID/scope rationale. Distinct from this fork's own TurboQuant+ codec —
+  don't reuse TurboQuant papers/policy for this. Two gotchas hit while integrating, worth checking
+  first on regressions in this area:
+  - `mul_mat_vec_q_switch_type`'s per-type `case` branches in `ggml/src/ggml-cuda/mmvq.cu` must all
+    forward `allow_small_k` to `mul_mat_vec_q_switch_ncols_dst` — that parameter is fork-specific
+    (not upstream), so a new case copied from upstream source silently compiles-fails rather than
+    conflicting, since git sees no merge conflict on code that didn't exist in the common ancestor.
+  - A Hadamard-folded model's MTP/NextN subgraph needs its *own* inverse-transform wiring after its
+    embedding lookup (see `llama_model_qwen35::graph_mtp` in `src/models/qwen35.cpp`) — the trunk
+    path applying it in `llm_graph_context::build_inp_embd` does not cover MTP, which builds its own
+    `ggml_get_rows()` independently. Missing this throws `Hadamard-latent table '...' is read
+    without the inverse transform` / `failed to create MTP context` at load, not silently wrong output.
+- **Python GGUF tooling and new quant types** — the runtime image's pip-installed `gguf` package
+  (from `requirements.txt`) is upstream PyPI and does not know about fork-added `GGMLQuantizationType`
+  members (e.g. `PQ2_0`=142); it raises `ValueError: 142 is not a valid GGMLQuantizationType` on
+  `GGUFReader` for any GGUF using one. Always run Python GGUF tooling with this repo's local
+  `gguf-py/` taking priority (`PYTHONPATH=/app/gguf-py`, or the `sys.path.insert` pattern already
+  used in `scripts/*.py`) — see `scripts/merge-mtp-gguf.sh` for the reference invocation.

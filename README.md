@@ -79,6 +79,30 @@ All turbo formats use Walsh-Hadamard rotation followed by polar codebook quantiz
 - **Hybrid architectures (GDN, Mamba)** — speculative decoding cherry-picked from upstream feature branches
 - All existing llama.cpp model families remain fully supported
 
+### Ternary quant types (cherry-picked, not part of TurboQuant+)
+
+`PQ2_0` (2.13 bpw) and `PTQ1_0` (1.75 bpw) — ternary weight types for `Ternary-Bonsai-2`-class
+models, plus the Hadamard weight-fold activation runtime they depend on (`GGML_HINT_SRC0_IS_HADAMARD`,
+`llama_mul_mat_hadamard`, `llama_verify_hadamard_graph`). This is a **separate codec family from
+TurboQuant+** above (ternary + Hadamard rotation, not WHT + polar codebook) — don't conflate the two
+when reasoning about K/V compression policy or the papers linked above; those don't apply here.
+
+Cherry-picked from [`PrismML-Eng/llama.cpp`](https://github.com/PrismML-Eng/llama.cpp)'s `prism`
+branch, CUDA + CPU backends only (Metal/HIP/Vulkan were explicitly not ported — see conflict
+resolution notes on the relevant commits if extending to those backends later). GGML type IDs
+142 (`PQ2_0`) / 143 (`PTQ1_0`) were chosen deliberately high by upstream to avoid colliding with
+this fork's own type range (43-51); keep that gap in mind if either project adds more types.
+
+MTP grafting: `scripts/extract_mtp_gguf.py` / `merge_mtp_gguf.py` can attach a NextN/MTP head from
+one GGUF onto the trunk of a *different* GGUF, as long as architecture, hidden size, and vocab
+match — validated by grafting `Qwen3.8-27B-UD-IQ3_XXS-unsloth.gguf`'s MTP head onto a
+`Ternary-Bonsai-2-27B-PQ2_0` trunk (~40-100% decode speedup, 50%+ draft acceptance). On a
+Hadamard-folded target, the MTP subgraph needs its *own* inverse-transform wiring
+(`llama_model_qwen35::graph_mtp`, `src/models/qwen35.cpp`) — the trunk path's fix
+(`llm_graph_context::build_inp_embd`) does not cover it, since MTP builds its embedding lookup
+independently. Symptom if missing: `Hadamard-latent table 'token_embd.weight' is read without the
+inverse transform` / `failed to create MTP context`.
+
 ### Operational fixes carried by this fork
 
 - CPU `vec_dot` heap-allocation fix for turbo / TQ types at `n > 4096`
